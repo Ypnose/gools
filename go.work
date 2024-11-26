@@ -1,6 +1,7 @@
 go 1.23
 
 use (
+	./csvview
 	./go-pushover
 	./ipinfo
 	./tempo
