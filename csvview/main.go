@@ -8,7 +8,9 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"time"
 	"unicode/utf8"
+
 	"github.com/nsf/termbox-go"
 )
 
@@ -31,10 +33,13 @@ type Table struct {
 	editMode    bool
 	editBuf     strings.Builder
 	separator   rune
-	width      int
-	height     int
-	fromStdin  bool
-	search     struct {
+	width       int
+	height      int
+	fromStdin   bool
+	modified    bool
+	saveMsg     string
+	saveMsgTime int64
+	search      struct {
 		active    bool
 		results   [][2]int
 		current   int
@@ -140,6 +145,7 @@ func (t *Table) updateLayout() {
 }
 
 func (t *Table) draw() {
+	t.updateLayout()
 	termbox.Clear(termbox.ColorDefault, termbox.ColorDefault)
 
 	// Calculate visible columns
@@ -261,7 +267,7 @@ func (t *Table) drawStatus() {
 	}
 	drawString(0, t.height-1, status)
 
-	if t.editMode || t.search.active {
+	if t.editMode || t.search.active || (t.saveMsg != "" && time.Now().Unix()-t.saveMsgTime < 2) {
 		t.drawInputLine()
 	}
 }
@@ -271,9 +277,11 @@ func (t *Table) drawInputLine() {
 	if t.editMode {
 		t.statusBuf.WriteString("Editing: ")
 		t.statusBuf.WriteString(t.editBuf.String())
-	} else {
+	} else if t.search.active {
 		t.statusBuf.WriteString("Search: ")
 		t.statusBuf.WriteString(t.search.buf.String())
+	} else if t.saveMsg != "" && time.Now().Unix()-t.saveMsgTime < 2 {
+		t.statusBuf.WriteString(t.saveMsg)
 	}
 
 	line := t.statusBuf.String()
@@ -388,6 +396,7 @@ func (t *Table) handleEditMode(ev termbox.Event) bool {
 		t.data[t.currentRow][t.currentCol] = t.editBuf.String()
 		t.editMode = false
 		t.editBuf.Reset()
+		t.modified = true
 	case termbox.KeyEsc:
 		t.editMode = false
 		t.editBuf.Reset()
@@ -403,6 +412,32 @@ func (t *Table) handleEditMode(ev termbox.Event) bool {
 		}
 	}
 	return true
+}
+
+func (t *Table) confirmQuit() bool {
+	if !t.modified || t.fromStdin {
+		return true
+	}
+
+	t.statusBuf.Reset()
+	t.statusBuf.WriteString("Save changes? (y/n)")
+	drawString(0, t.height-2, t.statusBuf.String())
+	termbox.Flush()
+
+	for {
+		ev := termbox.PollEvent()
+		if ev.Type == termbox.EventKey {
+			switch ev.Ch {
+			case 'y', 'Y':
+				t.saveFile()
+				return true
+			case 'n', 'N':
+				return true
+			case 'q', 3: // 3 is Ctrl+C
+				return false  // Cancel quit
+			}
+		}
+	}
 }
 
 func (t *Table) handleNavigation(ev termbox.Event) bool {
@@ -460,12 +495,18 @@ func (t *Table) handleNavigation(ev termbox.Event) bool {
 	case termbox.KeyCtrlS:
 		t.sortCurrentColumn()
 	case termbox.KeyCtrlC, termbox.KeyEsc:
-		return false
+		if t.confirmQuit() {
+			return false  // Exit
+		}
+		return true     // Continue if user cancelled
 	}
 
-switch ev.Ch {
+	switch ev.Ch {
 	case 'q':
-		return false
+		if t.confirmQuit() {
+			return false  // Exit
+		}
+		return true     // Continue if user cancelled
 	case 'e':
 		if !t.fromStdin {
 			t.editMode = true
@@ -512,6 +553,7 @@ func (t *Table) saveFile() error {
 
 	file, err := os.Create(flag.Args()[0])
 	if err != nil {
+		t.saveMsg = "Error: " + err.Error()
 		return err
 	}
 	defer file.Close()
@@ -533,12 +575,21 @@ func (t *Table) saveFile() error {
 			}
 		}
 		if err := writer.Write(row); err != nil {
+			t.saveMsg = "Error: " + err.Error()
 			return err
 		}
 	}
 
 	writer.Flush()
-	return writer.Error()
+	if err := writer.Error(); err != nil {
+		t.saveMsg = "Error: " + err.Error()
+		return err
+	}
+
+	t.saveMsg = "File saved successfully"
+	t.saveMsgTime = time.Now().Unix()
+	t.modified = false
+	return nil
 }
 
 func min(a, b int) int {
@@ -553,6 +604,11 @@ func max(a, b int) int {
 		return a
 	}
 	return b
+}
+
+func isDataFromStdin() bool {
+	fi, _ := os.Stdin.Stat()
+	return (fi.Mode() & os.ModeCharDevice) == 0
 }
 
 func printUsage() {
@@ -623,9 +679,4 @@ func main() {
 			break
 		}
 	}
-}
-
-func isDataFromStdin() bool {
-	fi, _ := os.Stdin.Stat()
-	return (fi.Mode() & os.ModeCharDevice) == 0
 }
