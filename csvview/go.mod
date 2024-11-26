@@ -1,4 +1,4 @@
-module github.com/Ypnose/gools/csvviewer
+module github.com/Ypnose/gools/csvview
 
 go 1.23
 
