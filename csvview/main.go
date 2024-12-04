@@ -619,7 +619,7 @@ Usage: %s [options] filename
 
 Options:
   -help           Show this help message
-  -separator      Field separator character (default ",")
+  -separator      Field separator character (default ";")
 
 Navigation:
 Arrow keys   Move cursor
@@ -633,7 +633,7 @@ q            Quit
 
 Examples:
   %s data.csv
-  %s -separator ";" data.txt
+  %s -separator "," data.txt
   %s -separator $'\t' data.tsv
   %s < data.csv
 `
@@ -642,7 +642,7 @@ Examples:
 
 func main() {
 	help := flag.Bool("help", false, "Show help message")
-	separatorFlag := flag.String("separator", ",", "Field separator character")
+	separatorFlag := flag.String("separator", ";", "Field separator character (default \";\")")
 	flag.Usage = printUsage
 	flag.Parse()
 
