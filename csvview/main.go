@@ -24,6 +24,11 @@ type colInfo struct {
 	startPos int
 }
 
+// Clean reader for stdin to handle gpg output
+type cleanReader struct {
+	r io.Reader
+}
+
 type Table struct {
 	data        [][]string
 	cols        []colInfo
@@ -101,6 +106,16 @@ func NewTable(separator rune) (*Table, error) {
 
 	t.updateLayout()
 	return t, nil
+}
+
+func (cr *cleanReader) Read(p []byte) (n int, err error) {
+	n, err = cr.r.Read(p)
+	for i := 0; i < n; i++ {
+		if p[i] < 32 && p[i] != 9 && p[i] != 10 && p[i] != 13 {
+			p[i] = ' '
+		}
+	}
+	return n, err
 }
 
 func (t *Table) updateLayout() {
@@ -240,7 +255,7 @@ func (t *Table) drawRow(y int, row []string, startCol int) {
 
 func (t *Table) drawStatus() {
 	t.statusBuf.Reset()
-	fmt.Fprintf(&t.statusBuf, "Row: %d/%d Col: %d/%d | ", 
+	fmt.Fprintf(&t.statusBuf, "Row: %d/%d Col: %d/%d | ",
 		t.currentRow+1, len(t.data),
 		t.currentCol+1, len(t.cols))
 
