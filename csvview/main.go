@@ -81,12 +81,18 @@ func NewTable(separator rune) (*Table, error) {
 	reader.FieldsPerRecord = -1
 	reader.Comma = separator
 
+	// Read and clean BOM if present
 	data, err := reader.ReadAll()
 	if err != nil {
 		return nil, err
 	}
 	if len(data) == 0 {
 		return nil, fmt.Errorf("empty data")
+	}
+
+	// Remove BOM from the first cell if present
+	if len(data[0]) > 0 && strings.HasPrefix(data[0][0], "\ufeff") {
+		data[0][0] = strings.TrimPrefix(data[0][0], "\ufeff")
 	}
 
 	t := &Table{
