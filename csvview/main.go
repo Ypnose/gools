@@ -501,25 +501,40 @@ func (t *Table) handleNavigation(ev termbox.Event) bool {
 			t.scrollRow = 0
 		}
 	case termbox.KeyHome:
-		t.currentCol = 0
-	case termbox.KeyEnd:
-		t.currentCol = len(t.cols) - 1
-	case termbox.KeyCtrlA:
 		t.currentRow = 0
 		t.scrollRow = 0
-	case termbox.KeyCtrlE:
+	case termbox.KeyEnd:
 		t.currentRow = len(t.data) - 1
 		t.scrollRow = max(0, t.currentRow-(t.height-3))
+	case termbox.KeyCtrlA:
+		t.currentCol = 0
+	case termbox.KeyCtrlE:
+		t.currentCol = len(t.cols) - 1
 	case termbox.KeyCtrlF:
 		t.search.active = true
 		t.search.buf.Reset()
+	case termbox.KeyCtrlI:
+		for i := range t.data {
+			t.data[i] = append(t.data[i][:t.currentCol+1],
+				append([]string{""},
+					t.data[i][t.currentCol+1:]...)...)
+		}
+		t.updateLayout()
+		t.modified = true
+	case termbox.KeyCtrlN:
+		newRow := make([]string, len(t.cols))
+		t.data = append(t.data[:t.currentRow+1],
+			append([][]string{newRow},
+				t.data[t.currentRow+1:]...)...)
+		t.currentRow++
+		t.modified = true
 	case termbox.KeyCtrlS:
 		t.sortCurrentColumn()
 	case termbox.KeyCtrlC, termbox.KeyEsc:
 		if t.confirmQuit() {
 			return false  // Exit
 		}
-		return true     // Continue if user cancelled
+		return true
 	}
 
 	switch ev.Ch {
@@ -581,13 +596,13 @@ func (t *Table) saveFile() error {
 
 	writer := csv.NewWriter(file)
 	writer.Comma = t.separator
-	writer.UseCRLF = true
+	writer.UseCRLF = false
 
 	for _, row := range t.data {
 		for j, field := range row {
-			if strings.ContainsRune(field, t.separator) || 
-			   strings.Contains(field, "\"") || 
-			   strings.Contains(field, "\n") {
+			if strings.ContainsRune(field, t.separator) ||
+				strings.Contains(field, "\"") ||
+				strings.Contains(field, "\n") {
 				t.formatBuf.Reset()
 				t.formatBuf.WriteRune('"')
 				t.formatBuf.WriteString(strings.ReplaceAll(field, "\"", "\"\""))
@@ -645,10 +660,12 @@ Options:
 Navigation:
 Arrow keys   Move cursor
 PgUp/PgDn    Page up/down
-Home/End     Start/end of row
-Ctrl+A/E     First/last row
+Home/End     First/last row
+Ctrl+A/E     Start/end of row
 Ctrl+F       Search
 n/N          Next/previous match
+Ctrl+I       Insert new column at cursor position
+Ctrl+N       Add new row after current position
 Ctrl+S       Sort by column
 q            Quit
 
