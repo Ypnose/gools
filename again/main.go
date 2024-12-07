@@ -95,7 +95,7 @@ func (sv *SecurityValidator) IsSecureCommand(cmd string) error {
 	}
 
 	for _, shell := range forbiddenShells {
-		shellPattern := regexp.MustCompile(fmt.Sprintf(`(?i)^.*%s.*$`, regexp.QuoteMeta(shell)))
+		shellPattern := regexp.MustCompile(fmt.Sprintf(`(?i)\b%s\b`, regexp.QuoteMeta(shell)))
 		if shellPattern.MatchString(cmdLower) {
 			return fmt.Errorf("shell or interpreter detected: %s", shell)
 		}
