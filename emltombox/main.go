@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"flag"
 	"fmt"
-	"net/mail"
 	"os"
 	"path"
 	"strings"
@@ -114,34 +113,30 @@ func convertEMLToMBOX(emlPath string, writer *bufio.Writer) (messageInfo, error)
 	}
 	defer emlFile.Close()
 
+	scanner := bufio.NewScanner(emlFile)
 	buf := make([]byte, defaultBufSize)
-	reader := bufio.NewReaderSize(emlFile, defaultBufSize)
+	scanner.Buffer(buf, defaultBufSize)
 
-	// Read headers only until empty line
-	headers := make([]string, 0, 20)
-	var date time.Time
+	// First pass to get From and Date headers
 	var from string
-
-	for {
-		line, err := reader.ReadString('\n')
-		if err != nil || line == "\n" || line == "\r\n" {
+	var dateStr string
+	for scanner.Scan() {
+		line := scanner.Text()
+		if strings.HasPrefix(line, "From:") {
+			from = strings.TrimSpace(line[5:])
+		} else if strings.HasPrefix(line, "Date:") {
+			dateStr = strings.TrimSpace(line[5:])
+		}
+		if from != "" && dateStr != "" {
 			break
 		}
-		headers = append(headers, strings.TrimSpace(line))
-
-		lower := strings.ToLower(line)
-		if strings.HasPrefix(lower, "date:") {
-			dateStr := strings.TrimSpace(line[5:])
-			if parsedDate, err := mail.ParseDate(dateStr); err == nil {
-				date = parsedDate
-			}
-		} else if strings.HasPrefix(lower, "from:") {
-			from = strings.TrimSpace(line[5:])
-		}
+	}
+	if err := scanner.Err(); err != nil {
+		return info, fmt.Errorf("error reading EML file: %v", err)
 	}
 
 	if from == "" {
-		from = "unknown@localhost"
+		from = "MAILER-DAEMON@localhost"
 	} else if start := strings.LastIndex(from, "<"); start != -1 {
 		if end := strings.LastIndex(from, ">"); end != -1 {
 			from = from[start+1 : end]
@@ -149,38 +144,40 @@ func convertEMLToMBOX(emlPath string, writer *bufio.Writer) (messageInfo, error)
 	}
 	info.from = from
 
-	if date.IsZero() {
-		date = time.Now()
+	// Parse date or use current time as fallback
+	date := time.Now()
+	if dateStr != "" {
+		if parsedDate, err := time.Parse(time.RFC1123Z, dateStr); err == nil {
+			date = parsedDate
+		} else if parsedDate, err := time.Parse(time.RFC822Z, dateStr); err == nil {
+			date = parsedDate
+		} else if parsedDate, err := time.Parse("Mon, 2 Jan 2006 15:04:05 -0700", dateStr); err == nil {
+			date = parsedDate
+		}
 	}
 
-	// Write From_ line
+	// Write MBOX From_ line
 	if _, err := fmt.Fprintf(writer, "From %s %s\n", from, date.Format("Mon Jan 2 15:04:05 2006")); err != nil {
 		return info, fmt.Errorf("cannot write From_ line: %v", err)
 	}
 
-	// Write headers
-	for _, header := range headers {
-		if _, err := fmt.Fprintln(writer, header); err != nil {
-			return info, fmt.Errorf("cannot write header: %v", err)
-		}
+	// Reset to start of file for full copy
+	if _, err := emlFile.Seek(0, 0); err != nil {
+		return info, fmt.Errorf("cannot reset file position: %v", err)
 	}
 
-	// Write headers/body separator
-	if _, err := fmt.Fprintln(writer); err != nil {
-		return info, fmt.Errorf("cannot write separator: %v", err)
-	}
-
-	// Copy body with From-escaping
-	scanner := bufio.NewScanner(reader)
+	// Full copy of EML content
+	scanner = bufio.NewScanner(emlFile)
 	scanner.Buffer(buf, defaultBufSize)
 
 	for scanner.Scan() {
 		line := scanner.Text()
+		// Escape From_ lines in content
 		if strings.HasPrefix(line, "From ") {
 			line = ">" + line
 		}
 		if _, err := fmt.Fprintln(writer, line); err != nil {
-			return info, fmt.Errorf("cannot write message content: %v", err)
+			return info, fmt.Errorf("cannot write line: %v", err)
 		}
 	}
 
@@ -188,9 +185,8 @@ func convertEMLToMBOX(emlPath string, writer *bufio.Writer) (messageInfo, error)
 		return info, fmt.Errorf("error reading EML content: %v", err)
 	}
 
-	// Add message separator
-	_, err = fmt.Fprintln(writer)
-	if err != nil {
+	// Add blank line between messages
+	if _, err := fmt.Fprintln(writer); err != nil {
 		return info, fmt.Errorf("cannot write message separator: %v", err)
 	}
 
