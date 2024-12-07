@@ -46,7 +46,7 @@ func getTempoData(endpoint string) (*TempoResponse, error) {
 		return nil, err
 	}
 	defer resp.Body.Close()
-	
+
 	var tempo TempoResponse
 	if err := json.NewDecoder(resp.Body).Decode(&tempo); err != nil {
 		return nil, err
