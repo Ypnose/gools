@@ -14,7 +14,7 @@ func main() {
 		return
 	}
 
-	req, err := http.NewRequest(http.MethodGet, 
+	req, err := http.NewRequest(http.MethodGet,
 		"http://ipinfo.io"+getPath(args), nil)
 	if err != nil {
 		die(err)
