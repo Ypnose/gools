@@ -19,6 +19,11 @@ The following commands work for all subdirectories.
 	# For an ARM64 binary running on Linux
 	GOOS=linux GOARCH=arm64 go build -ldflags "-w -s"
 
+> [!WARNING]
+> For Raspberry Pi 1 compatible binary, `GOARM` needs to be specified
+
+	GOOS=linux GOARCH=arm GOARM=5 go build -ldflags "-w -s"
+
 ## License
 
 BSD 3-Clause License. Check
