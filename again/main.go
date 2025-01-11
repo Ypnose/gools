@@ -63,8 +63,8 @@ func getToolName() string {
 }
 
 func displayUsage() {
-	fmt.Fprintf(os.Stderr, "Usage: %s <command>\n", getToolName())
-	fmt.Fprintf(os.Stderr, "\nRepeatedly executes the specified command.\n")
+	fmt.Fprintf(os.Stderr, "Usage: %s [command]\n", getToolName())
+	fmt.Fprintf(os.Stderr, "Repeatedly executes the specified command\n")
 	os.Exit(0)
 }
 
