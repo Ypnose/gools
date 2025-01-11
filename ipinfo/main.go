@@ -10,7 +10,7 @@ import (
 func main() {
 	args := os.Args
 	if len(args) > 1 && args[1] == "-help" {
-		fmt.Printf("Usage: %s [IP]\n  Get IP info from ipinfo.io\n", args[0])
+		fmt.Printf("Usage: %s [IP]\nGet IP info from ipinfo.io\n", args[0])
 		return
 	}
 
