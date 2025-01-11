@@ -120,7 +120,7 @@ func main() {
 			fmt.Fprintf(os.Stderr, "Error resolving output path: %v\n", err)
 			os.Exit(1)
 		}
-		
+
 		// Validate output directory exists
 		outDir := filepath.Dir(outfile)
 		if _, err := os.Stat(outDir); os.IsNotExist(err) {

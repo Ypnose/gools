@@ -42,7 +42,7 @@ func run(verbose bool) int {
 	}()
 
 	cmd := exec.CommandContext(ctx, flag.Arg(0), flag.Args()[1:]...)
-	
+
 	var stdout, stderr bytes.Buffer
 	stdout.Grow(4096)
 	stderr.Grow(4096)
