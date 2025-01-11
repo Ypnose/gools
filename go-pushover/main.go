@@ -68,7 +68,7 @@ func main() {
 	debug := flag.Bool("debug", false, "Enable debug logging")
 
 	flag.Usage = func() {
-		log.Printf("Usage of %s:\n", os.Args[0])
+		log.Printf("Usage: %s\n", os.Args[0])
 		log.Println("  -title string")
 		log.Println("    Title of the message (required)")
 		log.Println("  -message string")
