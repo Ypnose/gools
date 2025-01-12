@@ -9,175 +9,179 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
-	"path/filepath"
 	"strings"
 	"syscall"
 )
 
+const usageMsg = "Usage: vipe \nAllows editing piped data in your $EDITOR"
+
+func generateRandomName() string {
+	bytes := make([]byte, 16)
+	if _, err := rand.Read(bytes); err != nil {
+		fatal("random generation failed:", err)
+	}
+	return hex.EncodeToString(bytes)
+}
+
 func main() {
+	// Custom flag handling to match exact error messages
 	flag.Usage = func() {
-		fmt.Fprintf(os.Stderr, "Usage: %s \nAllows editing piped data in your $EDITOR\n", os.Args[0])
+		fmt.Fprintln(os.Stderr, usageMsg)
 	}
 
-	help := flag.Bool("help", false, "show help")
+	if len(os.Args) > 1 {
+		arg := os.Args[1]
+		if strings.HasPrefix(arg, "-") && arg != "-help" {
+			fmt.Fprintf(os.Stderr, "flag provided but not defined: %s\n%s\n", arg, usageMsg)
+			os.Exit(1)
+		}
+	}
+
 	flag.Parse()
 
-	if *help {
+	if flag.NArg() > 0 {
 		flag.Usage()
-		os.Exit(0)
-	}
-
-	if !checkStdinPipe() {
-		fmt.Fprintf(os.Stderr, "Error: no data piped to stdin\n")
 		os.Exit(1)
 	}
 
-	tmpFile, err := createSecureTempFile()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+	if isTerminal(os.Stdin) {
+		fmt.Fprintln(os.Stderr, "Error: no data piped to stdin")
 		os.Exit(1)
 	}
-	tmpName := tmpFile.Name()
 
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
-	go func() {
-		<-sigChan
-		secureShred(tmpName)
-		os.Exit(1)
-	}()
-	defer secureShred(tmpName)
 
-	if err := copyWithProgress(tmpFile, os.Stdin); err != nil {
-		fmt.Fprintf(os.Stderr, "Error copying stdin: %v\n", err)
+	randName := generateRandomName()
+	tmpfile, err := os.CreateTemp("", "vipe-"+randName+".*")
+	if err != nil {
+		fatal("tempfile creation failed:", err)
+	}
+	tmpPath := tmpfile.Name()
+
+	cleanup := func() {
+		secureDelete(tmpPath)
 		os.Exit(1)
 	}
-	tmpFile.Close()
+
+	go func() {
+		<-sigChan
+		cleanup()
+	}()
+
+	defer cleanup()
+
+	if err := tmpfile.Chmod(0600); err != nil {
+		fatal("chmod failed:", err)
+	}
+
+	if _, err := io.Copy(tmpfile, os.Stdin); err != nil {
+		fatal("stdin copy failed:", err)
+	}
+	if err := tmpfile.Sync(); err != nil {
+		fatal("sync failed:", err)
+	}
+	tmpfile.Close()
 
 	tty, err := os.OpenFile("/dev/tty", os.O_RDWR, 0)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error opening TTY: %v\n", err)
-		os.Exit(1)
+		if os.IsNotExist(err) {
+			fatal("no TTY available:", err)
+		}
+		if os.IsPermission(err) {
+			fatal("TTY access denied:", err)
+		}
+		fatal("TTY open failed:", err)
 	}
-	defer tty.Close()
+
+	oldStdin, oldStdout := os.Stdin, os.Stdout
+	defer func() {
+		if err := tty.Close(); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: failed to close TTY: %v\n", err)
+		}
+		os.Stdin, os.Stdout = oldStdin, oldStdout
+	}()
+
+	if _, err := tty.Stat(); err != nil {
+		fatal("TTY stat failed:", err)
+	}
+
+	os.Stdin, os.Stdout = tty, tty
 
 	editor := getEditor()
-	cmdParts := strings.Fields(editor)
-	cmd := exec.Command(cmdParts[0], append(cmdParts[1:], tmpName)...)
-	cmd.Stdin = tty
-	cmd.Stdout = tty
-	cmd.Stderr = tty
-
-	if err := cmd.Run(); err != nil {
-		fmt.Fprintf(os.Stderr, "Editor error: %v\n", err)
-		os.Exit(1)
+	if editor == "" {
+		fatal("no editor found:", fmt.Errorf("EDITOR/VISUAL not set and vi not available"))
 	}
 
-	edited, err := os.Open(tmpName)
+	editorParts := strings.Fields(editor)
+	cmd := exec.Command(editorParts[0], append(editorParts[1:], tmpPath)...)
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
+
+	if err := cmd.Run(); err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			os.Exit(exitErr.ExitCode())
+		}
+		fatal("editor failed:", err)
+	}
+
+	edited, err := os.OpenFile(tmpPath, os.O_RDONLY, 0600)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error reading edited file: %v\n", err)
-		os.Exit(1)
+		fatal("result open failed:", err)
 	}
 	defer edited.Close()
 
-	if err := copyWithProgress(os.Stdout, edited); err != nil {
-		fmt.Fprintf(os.Stderr, "Error copying to stdout: %v\n", err)
-		os.Exit(1)
+	if _, err := io.Copy(oldStdout, edited); err != nil {
+		fatal("output failed:", err)
 	}
-}
-
-func checkStdinPipe() bool {
-	stat, _ := os.Stdin.Stat()
-	return (stat.Mode() & os.ModeCharDevice) == 0
-}
-
-func copyWithProgress(dst io.Writer, src io.Reader) error {
-	buf := make([]byte, 32*1024)
-	for {
-		n, err := src.Read(buf)
-		if n > 0 {
-			if _, werr := dst.Write(buf[:n]); werr != nil {
-				return werr
-			}
-		}
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func secureRandomString(length int) (string, error) {
-	bytes := make([]byte, length)
-	if _, err := rand.Read(bytes); err != nil {
-		return "", err
-	}
-	return hex.EncodeToString(bytes), nil
-}
-
-func createSecureTempFile() (*os.File, error) {
-	randStr, err := secureRandomString(16)
-	if err != nil {
-		return nil, fmt.Errorf("failed to generate random string: %w", err)
-	}
-
-	tmpDir := os.TempDir()
-	filename := filepath.Join(tmpDir, fmt.Sprintf("vipe-%s.tmp", randStr))
-
-	file, err := os.OpenFile(filename, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0600)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create temp file: %w", err)
-	}
-
-	return file, nil
 }
 
 func getEditor() string {
-	for _, env := range []string{"EDITOR", "VISUAL"} {
-		if editor := os.Getenv(env); editor != "" {
-			return editor
-		}
+	if v := os.Getenv("VISUAL"); v != "" && v != " " {
+		return strings.TrimSpace(v)
+	}
+	if e := os.Getenv("EDITOR"); e != "" && e != " " {
+		return strings.TrimSpace(e)
 	}
 	if _, err := os.Stat("/usr/bin/editor"); err == nil {
 		return "/usr/bin/editor"
 	}
-	return "vi"
+	if _, err := os.Stat("/usr/bin/vi"); err == nil {
+		return "vi"
+	}
+	return ""
 }
 
-func secureShred(filename string) error {
-	zeros := make([]byte, 32*1024)
-	file, err := os.OpenFile(filename, os.O_WRONLY, 0600)
-	if err != nil {
-		return err
+func isTerminal(f *os.File) bool {
+	if stat, err := f.Stat(); err != nil {
+		return false
+	} else {
+		return (stat.Mode() & os.ModeCharDevice) != 0
 	}
-	defer file.Close()
+}
 
-	info, err := file.Stat()
-	if err != nil {
-		return err
+func secureDelete(path string) {
+	if f, err := os.OpenFile(path, os.O_WRONLY, 0600); err == nil {
+		defer f.Close()
+		if stat, err := f.Stat(); err == nil {
+			zeros := make([]byte, 4096)
+			remaining := stat.Size()
+			for remaining > 0 {
+				writeSize := int64(len(zeros))
+				if remaining < writeSize {
+					writeSize = remaining
+				}
+				if _, err := f.Write(zeros[:writeSize]); err != nil {
+					break
+				}
+				remaining -= writeSize
+			}
+			f.Sync()
+		}
 	}
+	os.Remove(path)
+}
 
-	for i := 0; i < 3; i++ {
-		if _, err := file.Seek(0, 0); err != nil {
-			return err
-		}
-		remaining := info.Size()
-		for remaining > 0 {
-			writeSize := int64(len(zeros))
-			if remaining < writeSize {
-				writeSize = remaining
-			}
-			if _, err := file.Write(zeros[:writeSize]); err != nil {
-				return err
-			}
-			remaining -= writeSize
-		}
-		if err := file.Sync(); err != nil {
-			return err
-		}
-	}
-	return os.Remove(filename)
+func fatal(msg string, err error) {
+	fmt.Fprintf(os.Stderr, "%s: %v\n", msg, err)
+	os.Exit(1)
 }
