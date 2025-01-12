@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"math/rand"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -11,15 +12,10 @@ import (
 	"syscall"
 )
 
-const bufferSize = 1024 * 1024 // 1MB for better performance with large files
-
-var helpFlag = flag.Bool("help", false, "display usage information")
+const bufferSize = 1024 * 1024
 
 func usage() {
-	if *helpFlag {
-		fmt.Fprintf(os.Stderr, "Usage: sponge [file]\nSoak up standard input and write to a file\n")
-		os.Exit(0)
-	}
+	fmt.Fprintf(os.Stderr, "Usage: sponge [file]\nSoak up standard input and write to a file\n")
 }
 
 func cleanup(tmpfile string) {
@@ -40,7 +36,6 @@ func setupSecureTempFile() (*os.File, string, error) {
 		tmpdir = "/tmp"
 	}
 
-	// Validate tmpdir is absolute
 	if !filepath.IsAbs(tmpdir) {
 		return nil, "", fmt.Errorf("temporary directory path must be absolute")
 	}
@@ -49,19 +44,21 @@ func setupSecureTempFile() (*os.File, string, error) {
 		return nil, "", fmt.Errorf("failed to create temp directory: %v", err)
 	}
 
-	tmpfile, err := os.CreateTemp(tmpdir, "sponge-*.tmp")
+	// Generate random string for filename (16 characters)
+	const letters = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+	b := make([]byte, 16)
+	for i := range b {
+		b[i] = letters[rand.Intn(len(letters))]
+	}
+
+	tmpname := filepath.Join(tmpdir, fmt.Sprintf("sponge-%s.tmp", string(b)))
+
+	tmpfile, err := os.OpenFile(tmpname, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0600)
 	if err != nil {
 		return nil, "", fmt.Errorf("failed to create temp file: %v", err)
 	}
 
-	// Immediately chmod to secure permissions
-	if err := tmpfile.Chmod(0600); err != nil {
-		tmpfile.Close()
-		os.Remove(tmpfile.Name())
-		return nil, "", fmt.Errorf("failed to set temp file permissions: %v", err)
-	}
-
-	return tmpfile, tmpfile.Name(), nil
+	return tmpfile, tmpname, nil
 }
 
 func handleSignals(tmpfile string, done chan<- struct{}) {
@@ -69,10 +66,7 @@ func handleSignals(tmpfile string, done chan<- struct{}) {
 	signal.Notify(sigChan,
 		syscall.SIGINT,
 		syscall.SIGTERM,
-		syscall.SIGHUP,
-		syscall.SIGQUIT,
-		syscall.SIGABRT,
-		syscall.SIGPIPE)
+		syscall.SIGHUP)
 
 	go func() {
 		<-sigChan
@@ -106,11 +100,16 @@ func main() {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 
-	flag.Parse()
-
-	if *helpFlag {
+	flag.Usage = func() {
+		if len(os.Args) > 1 && os.Args[1] == "-help" {
+			usage()
+			os.Exit(0)
+		}
+		fmt.Fprintf(os.Stderr, "flag provided but not defined: %s\n", os.Args[1])
 		usage()
+		os.Exit(1)
 	}
+	flag.Parse()
 
 	var outfile string
 	if flag.NArg() > 0 {
@@ -121,7 +120,6 @@ func main() {
 			os.Exit(1)
 		}
 
-		// Validate output directory exists
 		outDir := filepath.Dir(outfile)
 		if _, err := os.Stat(outDir); os.IsNotExist(err) {
 			fmt.Fprintf(os.Stderr, "Output directory does not exist\n")
@@ -171,9 +169,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Try atomic rename
 	if err := os.Rename(tmpname, outfile); err != nil {
-		// Fallback to copy if rename fails
 		src, err := os.Open(tmpname)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error opening temp file: %v\n", err)
@@ -181,7 +177,6 @@ func main() {
 		}
 		defer src.Close()
 
-		// Create with restrictive permissions first
 		dst, err := os.OpenFile(outfile, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error opening output file: %v\n", err)
