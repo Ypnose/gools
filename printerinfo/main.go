@@ -28,7 +28,7 @@ type Supply struct {
 
 func main() {
 	flag.Usage = func() {
-		fmt.Fprintf(os.Stderr, "Usage: printsnmp [-community string] [-version 1|2c] [printer]\n\n")
+		fmt.Fprintf(os.Stderr, "Usage: %s [-community string] [-version 1|2c] [printer]\n\n", os.Args[0])
 		fmt.Fprintf(os.Stderr, "Retrieves printer information via SNMPv1 and SNMPv2c\n\n")
 		fmt.Fprintf(os.Stderr, "Options:\n")
 		fmt.Fprintf(os.Stderr, "  -community string\n")
