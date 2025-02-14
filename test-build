@@ -1,0 +1,26 @@
+#!/bin/sh
+
+go_build() {
+	go build -ldflags "-w -s" -trimpath
+	file "$t"
+	ldd "$t"
+	du -sh "$t"
+}
+
+for t in *; do
+	if [ ! -d "$t" ] || [ ! -f "${t}/main.go" ]; then
+		continue
+	fi
+	(
+		clear
+		printf "> Building %s\n" "$t"
+		cd "$t"
+		go_build
+		CGO_ENABLED=0 go_build
+		GOOS=linux GOARCH=arm64 go_build
+		GOOS=darwin GOARCH=arm64 go_build
+		sleep 4
+	)
+done
+
+exit
