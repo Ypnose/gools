@@ -123,6 +123,8 @@ const htmlTemplate = `
 				document.getElementById('editor').value = text;
 			} else {
 				alert('Invalid password');
+				document.getElementById('password').value = '';
+				document.getElementById('password').focus();
 			}
 		}
 
