@@ -50,7 +50,7 @@ const htmlTemplate = `
 		}
 		@media (max-width:600px) {
 			:root {
-				font-size:0.875em;
+				font-size:0.875rem;
 			}
 		}
 		body {
@@ -68,37 +68,36 @@ const htmlTemplate = `
 			align-items:center;
 			flex-direction:column;
 		}
-		input[type="password"],button { font-size:1em; }
+		input[type="password"],button { font-size:1rem; }
 		input[type="password"] {
-			padding:0.5em;
-			margin:0.625em;
+			padding:0.5rem;
+			margin:0.625rem;
 		}
-		button { padding:0.2em 1em; }
+		button { padding:0.35rem 1rem; }
 		#editor-container,#filename { display:none; }
 		#editor-container,#filename,#editor { box-sizing:border-box; }
 		#editor-container { position:relative; }
 		#filename,#editor { background-color:var(--background); }
 		#filename {
-			font-size:0.85em;
+			font-size:0.85rem;
 			border-bottom:1px solid rgba(128, 128, 128, 0.2);
 			position:fixed;
 			top:0;
 			left:0;
 			right:0;
-			height:2.5em;
-			padding:0.5em 1em;
+			padding:0.55rem 1rem;
 			z-index:1;
 		}
 		#editor-container #filename { display:block; }
 		#editor {
 			font-family:ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
-			font-size:0.9em;
+			font-size:0.9rem;
 			width:100%;
-			height:calc(100% - 2.5em);
+			height:calc(100% - 2.5rem);
 			border:none;
 			outline:none;
-			padding:1em;
-			margin-top:2.5em;
+			padding:1rem;
+			margin-top:2.5rem;
 			resize:none;
 			line-height:1.2;
 		}
