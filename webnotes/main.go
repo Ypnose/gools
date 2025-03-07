@@ -43,9 +43,13 @@ const htmlTemplate = `
 		}
 		@media (prefers-color-scheme:dark) {
 			:root {
-				--background:#18212c;
+				--background:#21292c;
 				--text:#c9d1d9;
 				--link-color:#58a6ff;
+			}
+			input[type="password"] {
+				background-color:#21292c;
+				color:#c5d1d3;
 			}
 		}
 		@media (max-width:600px) {
@@ -72,6 +76,7 @@ const htmlTemplate = `
 		input[type="password"] {
 			padding:0.5rem;
 			margin:0.625rem;
+			border:1px solid #ced4da;
 		}
 		button { padding:0.35rem 1rem; }
 		#editor-container,#filename { display:none; }
@@ -148,7 +153,7 @@ const htmlTemplate = `
 </head>
 <body>
 	<div id="login-container">
-		<input type="password" id="password" placeholder="Enter password" onkeydown="if(event.key==='Enter')login()">
+		<input type="password" id="password" placeholder="Password" onkeydown="if(event.key==='Enter')login()">
 		<button onclick="login()">Unlock</button>
 	</div>
 	<div id="editor-container">
