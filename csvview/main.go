@@ -11,7 +11,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/nsf/termbox-go"
+	"github.com/gdamore/tcell/v2"
 )
 
 const (
@@ -58,9 +58,10 @@ type Table struct {
 	// Reusable buffers
 	statusBuf  strings.Builder
 	formatBuf  strings.Builder
+	screen     tcell.Screen
 }
 
-func NewTable(separator rune) (*Table, error) {
+func NewTable(separator rune, screen tcell.Screen) (*Table, error) {
 	fi, _ := os.Stdin.Stat()
 	fromStdin := (fi.Mode() & os.ModeCharDevice) == 0
 
@@ -99,6 +100,7 @@ func NewTable(separator rune) (*Table, error) {
 		data:      data,
 		fromStdin: fromStdin,
 		separator: separator,
+		screen:    screen,
 		sort: struct {
 			col     int
 			asc     bool
@@ -125,7 +127,7 @@ func (cr *cleanReader) Read(p []byte) (n int, err error) {
 }
 
 func (t *Table) updateLayout() {
-	t.width, t.height = termbox.Size()
+	t.width, t.height = t.screen.Size()
 
 	// Find max columns and calculate widths
 	maxCols := 0
@@ -167,7 +169,7 @@ func (t *Table) updateLayout() {
 
 func (t *Table) draw() {
 	t.updateLayout()
-	termbox.Clear(termbox.ColorDefault, termbox.ColorDefault)
+	t.screen.Clear()
 
 	// Calculate visible columns
 	startCol := t.findFirstVisibleColumn()
@@ -179,26 +181,19 @@ func (t *Table) draw() {
 	}
 
 	t.drawStatus()
-	termbox.Flush()
+	t.screen.Show()
 }
 
 func (t *Table) findFirstVisibleColumn() int {
+	// If current column fits on screen, try to show from beginning
 	availWidth := t.width - 1
 
-	// First try to show current column from start
-	totalWidth := 0
-	for i := 0; i <= t.currentCol; i++ {
-		totalWidth += t.cols[i].width + 2
-		if totalWidth <= availWidth {
-			if i == t.currentCol {
-				return 0
-			}
-		}
+	if t.currentCol == 0 {
+		return 0
 	}
 
-	// Otherwise, work backwards from current column
-	totalWidth = t.cols[t.currentCol].width + 2
-	start := t.currentCol
+	totalWidth := t.cols[t.currentCol].width + 2
+	startCol := t.currentCol
 
 	for i := t.currentCol - 1; i >= 0; i-- {
 		width := t.cols[i].width + 2
@@ -206,10 +201,10 @@ func (t *Table) findFirstVisibleColumn() int {
 			break
 		}
 		totalWidth += width
-		start = i
+		startCol = i
 	}
 
-	return start
+	return startCol
 }
 
 func (t *Table) drawRow(y int, row []string, startCol int) {
@@ -225,9 +220,9 @@ func (t *Table) drawRow(y int, row []string, startCol int) {
 		}
 
 		cell := row[i]
-		attr := termbox.ColorDefault
+		style := tcell.StyleDefault
 		if t.currentRow == y+t.scrollRow && t.currentCol == i {
-			attr = termbox.ColorBlack | termbox.AttrReverse
+			style = style.Reverse(true)
 		}
 
 		remainingWidth := availWidth - x
@@ -249,10 +244,16 @@ func (t *Table) drawRow(y int, row []string, startCol int) {
 			}
 		}
 
-		w := utf8.RuneCountInString(cell)
-		drawString(x, y, cell, attr)
+		// Show visual indicator for empty cells
+		displayCell := cell
+		if displayCell == "" {
+			displayCell = "◌"
+		}
+
+		w := utf8.RuneCountInString(displayCell)
+		drawString(t.screen, x, y, displayCell, style)
 		if pad := min(t.cols[i].width-w, remainingWidth-w); pad > 0 {
-			drawSpaces(x+w, y, pad, attr)
+			drawSpaces(t.screen, x+w, y, pad, style)
 		}
 
 		x += min(colWidth, remainingWidth)
@@ -286,7 +287,7 @@ func (t *Table) drawStatus() {
 	if w := utf8.RuneCountInString(status); w > t.width {
 		status = string([]rune(status)[:t.width])
 	}
-	drawString(0, t.height-1, status)
+	drawString(t.screen, 0, t.height-1, status, tcell.StyleDefault)
 
 	if t.editMode || t.search.active || (t.saveMsg != "" && time.Now().Unix()-t.saveMsgTime < 2) {
 		t.drawInputLine()
@@ -309,29 +310,26 @@ func (t *Table) drawInputLine() {
 	if w := utf8.RuneCountInString(line); w > t.width {
 		line = string([]rune(line)[:t.width])
 	}
-	drawString(0, t.height-2, line)
+	drawString(t.screen, 0, t.height-2, line, tcell.StyleDefault)
 }
 
-func drawString(x, y int, s string, attrs ...termbox.Attribute) {
-	attr := termbox.ColorDefault
-	if len(attrs) > 0 {
-		attr = attrs[0]
-	}
+func drawString(screen tcell.Screen, x, y int, s string, style tcell.Style) {
 	for _, r := range s {
-		termbox.SetCell(x, y, r, attr, termbox.ColorDefault)
+		screen.SetContent(x, y, r, nil, style)
 		x++
 	}
 }
 
-func drawSpaces(x, y, count int, attr termbox.Attribute) {
+func drawSpaces(screen tcell.Screen, x, y, count int, style tcell.Style) {
 	for i := 0; i < count; i++ {
-		termbox.SetCell(x+i, y, ' ', attr, termbox.ColorDefault)
+		screen.SetContent(x+i, y, ' ', nil, style)
 	}
 }
 
 func (t *Table) handleInput() bool {
-	switch ev := termbox.PollEvent(); ev.Type {
-	case termbox.EventKey:
+	ev := t.screen.PollEvent()
+	switch ev := ev.(type) {
+	case *tcell.EventKey:
 		if t.search.active {
 			return t.handleSearch(ev)
 		}
@@ -339,29 +337,32 @@ func (t *Table) handleInput() bool {
 			return t.handleEditMode(ev)
 		}
 		return t.handleNavigation(ev)
+	case *tcell.EventResize:
+		t.screen.Sync()
+		t.updateLayout()
 	}
 	return true
 }
 
-func (t *Table) handleSearch(ev termbox.Event) bool {
-	switch ev.Key {
-	case termbox.KeyEnter:
+func (t *Table) handleSearch(ev *tcell.EventKey) bool {
+	switch ev.Key() {
+	case tcell.KeyEnter:
 		t.performSearch()
 		t.search.active = false
 		t.search.buf.Reset()
-	case termbox.KeyEsc:
+	case tcell.KeyEscape:
 		t.search.active = false
 		t.search.buf.Reset()
 		t.search.results = nil
-	case termbox.KeyBackspace, termbox.KeyBackspace2:
+	case tcell.KeyBackspace, tcell.KeyBackspace2:
 		if t.search.buf.Len() > 0 {
 			str := t.search.buf.String()
 			t.search.buf.Reset()
 			t.search.buf.WriteString(str[:len(str)-1])
 		}
 	default:
-		if ev.Ch != 0 {
-			t.search.buf.WriteRune(ev.Ch)
+		if r := ev.Rune(); r != 0 {
+			t.search.buf.WriteRune(r)
 		}
 	}
 	return true
@@ -411,25 +412,25 @@ func (t *Table) jumpToResult(idx int) {
 	}
 }
 
-func (t *Table) handleEditMode(ev termbox.Event) bool {
-	switch ev.Key {
-	case termbox.KeyEnter:
+func (t *Table) handleEditMode(ev *tcell.EventKey) bool {
+	switch ev.Key() {
+	case tcell.KeyEnter:
 		t.data[t.currentRow][t.currentCol] = t.editBuf.String()
 		t.editMode = false
 		t.editBuf.Reset()
 		t.modified = true
-	case termbox.KeyEsc:
+	case tcell.KeyEscape:
 		t.editMode = false
 		t.editBuf.Reset()
-	case termbox.KeyBackspace, termbox.KeyBackspace2:
+	case tcell.KeyBackspace, tcell.KeyBackspace2:
 		if t.editBuf.Len() > 0 {
 			str := t.editBuf.String()
 			t.editBuf.Reset()
 			t.editBuf.WriteString(str[:len(str)-1])
 		}
 	default:
-		if ev.Ch != 0 {
-			t.editBuf.WriteRune(ev.Ch)
+		if r := ev.Rune(); r != 0 {
+			t.editBuf.WriteRune(r)
 		}
 	}
 	return true
@@ -442,56 +443,60 @@ func (t *Table) confirmQuit() bool {
 
 	t.statusBuf.Reset()
 	t.statusBuf.WriteString("Save changes? (y/n)")
-	drawString(0, t.height-2, t.statusBuf.String())
-	termbox.Flush()
+	drawString(t.screen, 0, t.height-2, t.statusBuf.String(), tcell.StyleDefault)
+	t.screen.Show()
 
 	for {
-		ev := termbox.PollEvent()
-		if ev.Type == termbox.EventKey {
-			switch ev.Ch {
+		ev := t.screen.PollEvent()
+		switch ev := ev.(type) {
+		case *tcell.EventKey:
+			switch ev.Rune() {
 			case 'y', 'Y':
 				t.saveFile()
 				return true
 			case 'n', 'N':
 				return true
-			case 'q', 3: // 3 is Ctrl+C
-				return false  // Cancel quit
+			case 'q':
+				return false
+			}
+			if ev.Key() == tcell.KeyCtrlC {
+				return false
 			}
 		}
 	}
 }
 
-func (t *Table) handleNavigation(ev termbox.Event) bool {
-	switch ev.Key {
-	case termbox.KeyArrowLeft:
+func (t *Table) handleNavigation(ev *tcell.EventKey) bool {
+	switch ev.Key() {
+	case tcell.KeyLeft:
 		if t.currentCol > 0 {
 			t.currentCol--
 		}
-	case termbox.KeyArrowRight:
+	case tcell.KeyRight:
 		if t.currentCol < len(t.cols)-1 {
 			t.currentCol++
 		}
-	case termbox.KeyArrowUp:
+	case tcell.KeyUp:
 		if t.currentRow > 0 {
 			t.currentRow--
 			if t.currentRow < t.scrollRow {
 				t.scrollRow--
 			}
 		}
-	case termbox.KeyArrowDown:
+	case tcell.KeyDown:
 		if t.currentRow < len(t.data)-1 {
 			t.currentRow++
 			if t.currentRow-t.scrollRow > t.height-3 {
 				t.scrollRow++
 			}
 		}
-	case termbox.KeyPgup:
+	case tcell.KeyPgUp:
 		t.currentRow -= (t.height - 2)
 		if t.currentRow < 0 {
 			t.currentRow = 0
 		}
 		t.scrollRow = t.currentRow
-	case termbox.KeyPgdn:
+	case tcell.KeyPgDn:
 		t.currentRow += (t.height - 2)
 		if t.currentRow >= len(t.data) {
 			t.currentRow = len(t.data) - 1
@@ -500,20 +505,20 @@ func (t *Table) handleNavigation(ev termbox.Event) bool {
 		if t.scrollRow < 0 {
 			t.scrollRow = 0
 		}
-	case termbox.KeyHome:
+	case tcell.KeyHome:
 		t.currentRow = 0
 		t.scrollRow = 0
-	case termbox.KeyEnd:
+	case tcell.KeyEnd:
 		t.currentRow = len(t.data) - 1
 		t.scrollRow = max(0, t.currentRow-(t.height-3))
-	case termbox.KeyCtrlA:
+	case tcell.KeyCtrlA:
 		t.currentCol = 0
-	case termbox.KeyCtrlE:
+	case tcell.KeyCtrlE:
 		t.currentCol = len(t.cols) - 1
-	case termbox.KeyCtrlF:
+	case tcell.KeyCtrlF:
 		t.search.active = true
 		t.search.buf.Reset()
-	case termbox.KeyCtrlI:
+	case tcell.KeyCtrlI:
 		for i := range t.data {
 			t.data[i] = append(t.data[i][:t.currentCol+1],
 				append([]string{""},
@@ -521,23 +526,23 @@ func (t *Table) handleNavigation(ev termbox.Event) bool {
 		}
 		t.updateLayout()
 		t.modified = true
-	case termbox.KeyCtrlN:
+	case tcell.KeyCtrlN:
 		newRow := make([]string, len(t.cols))
 		t.data = append(t.data[:t.currentRow+1],
 			append([][]string{newRow},
 				t.data[t.currentRow+1:]...)...)
 		t.currentRow++
 		t.modified = true
-	case termbox.KeyCtrlS:
+	case tcell.KeyCtrlS:
 		t.sortCurrentColumn()
-	case termbox.KeyCtrlC, termbox.KeyEsc:
+	case tcell.KeyCtrlC, tcell.KeyEscape:
 		if t.confirmQuit() {
 			return false  // Exit
 		}
 		return true
 	}
 
-	switch ev.Ch {
+	switch ev.Rune() {
 	case 'q':
 		if t.confirmQuit() {
 			return false  // Exit
@@ -594,32 +599,27 @@ func (t *Table) saveFile() error {
 	}
 	defer file.Close()
 
-	writer := csv.NewWriter(file)
-	writer.Comma = t.separator
-	writer.UseCRLF = false
-
 	for _, row := range t.data {
 		for j, field := range row {
-			if strings.ContainsRune(field, t.separator) ||
-				strings.Contains(field, "\"") ||
-				strings.Contains(field, "\n") {
-				t.formatBuf.Reset()
-				t.formatBuf.WriteRune('"')
-				t.formatBuf.WriteString(strings.ReplaceAll(field, "\"", "\"\""))
-				t.formatBuf.WriteRune('"')
-				row[j] = t.formatBuf.String()
+			if j > 0 {
+				file.WriteString(string(t.separator))
+			}
+
+			// Special handling for fields starting with =
+			if strings.HasPrefix(field, "=") && strings.Contains(field, "\"") {
+				// Write it exactly as is - these are likely formula fields
+				file.WriteString(field)
+			} else if strings.ContainsRune(field, t.separator) ||
+					  strings.Contains(field, "\"") ||
+					  strings.Contains(field, "\n") {
+				file.WriteString("\"")
+				file.WriteString(strings.ReplaceAll(field, "\"", "\"\""))
+				file.WriteString("\"")
+			} else {
+				file.WriteString(field)
 			}
 		}
-		if err := writer.Write(row); err != nil {
-			t.saveMsg = "Error: " + err.Error()
-			return err
-		}
-	}
-
-	writer.Flush()
-	if err := writer.Error(); err != nil {
-		t.saveMsg = "Error: " + err.Error()
-		return err
+		file.WriteString("\n")
 	}
 
 	t.saveMsg = "File saved successfully"
@@ -696,17 +696,23 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err := termbox.Init(); err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to initialize terminal: %v\n", err)
+	screen, err := tcell.NewScreen()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to initialize screen: %v\n", err)
 		os.Exit(1)
 	}
-	defer termbox.Close()
+	if err := screen.Init(); err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to initialize screen: %v\n", err)
+		os.Exit(1)
+	}
+	defer screen.Fini()
 
-	termbox.SetInputMode(termbox.InputEsc)
+	screen.SetStyle(tcell.StyleDefault)
+	screen.Clear()
 
-	table, err := NewTable(separator)
+	table, err := NewTable(separator, screen)
 	if err != nil {
-		termbox.Close()
+		screen.Fini()
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
