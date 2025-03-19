@@ -10,7 +10,7 @@ import (
 )
 
 func printUsage(toolName string) {
-	fmt.Fprintf(os.Stderr, "Usage: %s [file]\nDisplay Unicode code points\n", toolName)
+	fmt.Fprintf(os.Stderr, "Usage: %s [file]\nDump Unicode code points\n", toolName)
 }
 
 func processInput(reader io.Reader) error {
