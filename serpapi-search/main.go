@@ -2,89 +2,98 @@ package main
 
 import (
 	"bufio"
-	"context"
 	"crypto/tls"
 	"encoding/json"
 	"flag"
 	"fmt"
-	"io"
-	"log"
 	"log/syslog"
 	"net/http"
+	"net/url"
 	"os"
-	"path/filepath"
 	"sort"
 	"time"
 )
 
-const (
-	apiKey = "" // Source code API key (optional)
-	defaultTimeout = 30 * time.Second
-)
+// You can set your API key directly here
+const DefaultAPIKey = ""
 
-type SearchResult struct {
-	OrganicResults []struct {
-		Position      int    `json:"position"`
-		Title         string `json:"title"`
-		Link          string `json:"link"`
-		RedirectLink  string `json:"redirect_link"`
-		DisplayedLink string `json:"displayed_link"`
-		Snippet       string `json:"snippet"`
-		Source        string `json:"source"`
-	} `json:"organic_results"`
+// Result represents a single search result from the organic_results
+type Result struct {
+	Position      int    `json:"position"`
+	Title         string `json:"title"`
+	Link          string `json:"link"`
+	RedirectLink  string `json:"redirect_link"`
+	DisplayedLink string `json:"displayed_link"`
+	Snippet       string `json:"snippet"`
+	Source        string `json:"source"`
 }
 
-type ResultEntry struct {
-	Position int
-	Line     string
+// Response represents the API response structure
+type Response struct {
+	OrganicResults []APIResult `json:"organic_results"`
 }
 
-func getAPIKey() string {
-	if apiKey != "" {
-		return apiKey
-	}
-	return os.Getenv("SERPAPI_KEY")
-}
-
-func sortResultsByPosition(results []ResultEntry) []ResultEntry {
-	sort.Slice(results, func(i, j int) bool {
-		return results[i].Position < results[j].Position
-	})
-	return results
+// APIResponse represents the raw API response
+type APIResult struct {
+	Position      int    `json:"position"`
+	Title         string `json:"title"`
+	Link          string `json:"link"`
+	RedirectLink  string `json:"redirect_link"`
+	DisplayedLink string `json:"displayed_link"`
+	Favicon       string `json:"favicon,omitempty"`
+	Snippet       string `json:"snippet"`
+	Source        string `json:"source"`
 }
 
 func main() {
 	binaryName := os.Args[0]
 
-	fileFlag := flag.String("file", "", "Output file")
-	queryFlag := flag.String("query", "", "Search query")
-	helpFlag := flag.Bool("help", false, "Show help")
+	// Set up logging to syslog
+	syslogWriter, err := syslog.New(syslog.LOG_NOTICE|syslog.LOG_USER, binaryName)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error setting up syslog: %v\n", err)
+	} else {
+		defer syslogWriter.Close()
+	}
+	var (
+		query    string
+		outFile  string
+		location string
+		verbose  bool
+	)
+
+	flag.StringVar(&query, "query", "", "")
+	flag.StringVar(&outFile, "file", "", "")
+	flag.StringVar(&location, "location", "Paris,Paris,Ile-de-France,France", "")
+	flag.BoolVar(&verbose, "verbose", false, "")
+
+	usageMessage := fmt.Sprintf("Usage: %s [-file FILE] [-query QUERY] [-location LOCATION] [-verbose]\n", binaryName)
+	
+	flag.Usage = func() {
+		fmt.Fprint(os.Stderr, usageMessage)
+	}
 
 	flag.Parse()
 
-	if *helpFlag {
-		fmt.Printf("Usage: %s [-file FILE] [-query QUERY]\n", filepath.Base(binaryName))
-		os.Exit(0)
-	}
-
-	if *queryFlag == "" || *fileFlag == "" {
-		log.Println("Both -file and -query arguments are required")
+	// Check for required arguments
+	if query == "" || outFile == "" {
+		fmt.Fprint(os.Stderr, usageMessage)
+		fmt.Fprintf(os.Stderr, "Error: Both -file and -query are required\n")
 		os.Exit(1)
 	}
 
-	syslogWriter, err := syslog.New(syslog.LOG_INFO, filepath.Base(binaryName))
-	if err != nil {
-		log.Println("Could not create syslog writer:", err)
-		os.Exit(1)
-	}
-	defer syslogWriter.Close()
-
-	apiKeyToUse := getAPIKey()
-	if apiKeyToUse == "" {
-		log.Println("No API key found")
-		os.Exit(1)
+	// Get API key from environment variable or use default
+	apiKey := os.Getenv("SERPAPI_KEY")
+	if apiKey == "" {
+		// Use the default API key if set in the code
+		apiKey = DefaultAPIKey
+		if apiKey == "" {
+			fmt.Fprintf(os.Stderr, "Error: SERPAPI_KEY environment variable is not set and no default API key is provided in the code\n")
+			os.Exit(1)
+		}
 	}
 
+	// Configure TLS to only use TLS 1.3 with specific cipher suites
 	tlsConfig := &tls.Config{
 		MinVersion: tls.VersionTLS13,
 		MaxVersion: tls.VersionTLS13,
@@ -92,143 +101,216 @@ func main() {
 			tls.TLS_AES_256_GCM_SHA384,
 			tls.TLS_CHACHA20_POLY1305_SHA256,
 		},
-		InsecureSkipVerify: false,
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
-	defer cancel()
-
+	// Configure HTTP client with connection pooling and timeouts
 	transport := &http.Transport{
 		TLSClientConfig: tlsConfig,
-		DisableKeepAlives: true,
+		MaxIdleConns: 10,
+		MaxIdleConnsPerHost: 5,
+		IdleConnTimeout: 90 * time.Second,
 	}
 	client := &http.Client{
 		Transport: transport,
-		Timeout:   defaultTimeout,
+		Timeout: 30 * time.Second,
 	}
 
-	url := fmt.Sprintf("https://serpapi.com/search?api_key=%s&engine=google&q=%s&location=France&google_domain=google.com&gl=us&hl=en&safe=off&filter=0&num=200&device=mobile&cr=countryUS|countryFR|countryDE|countryRU|countryJP|countryKR|countryCN&lr=lang_en|lang_fr|lang_de|lang_ru|lang_ja|lang_ko|lang_zh-CN|lang_zh-TW",
-		apiKeyToUse, *queryFlag)
+	// Build request URL with query parameters
+	baseURL := "https://serpapi.com/search"
+	params := url.Values{}
+	params.Add("api_key", apiKey)
+	params.Add("engine", "google")
+	params.Add("q", query)
+	params.Add("location", location)
+	params.Add("google_domain", "google.com")
+	params.Add("gl", "us")
+	params.Add("hl", "en")
+	params.Add("safe", "off")
+	params.Add("filter", "0")
+	params.Add("num", "200")
+	params.Add("device", "mobile")
+	params.Add("cr", "countryUS|countryFR|countryBE|countryDE|countryBR|countryRU|countryJP|countryLU|countryUK|countryCN")
+	params.Add("lr", "lang_en|lang_fr|lang_de|lang_ru|lang_ja|lang_pt|lang_zh-CN|lang_zh-TW")
 
-	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
-	if err != nil {
-		log.Println(fmt.Sprintf("Error creating request: %v", err))
-		os.Exit(1)
-	}
+	// Construct final URL with parameters
+	requestURL := baseURL + "?" + params.Encode()
 
-	resp, err := client.Do(req)
+	// Make the request
+	resp, err := client.Get(requestURL)
 	if err != nil {
-		log.Println(fmt.Sprintf("Error making request: %v", err))
+		fmt.Fprintf(os.Stderr, "Error making request: %v\n", err)
 		os.Exit(1)
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		log.Println(fmt.Sprintf("Error reading response: %v", err))
+	if resp.StatusCode != http.StatusOK {
+		fmt.Fprintf(os.Stderr, "Error: API returned status code %d\n", resp.StatusCode)
 		os.Exit(1)
 	}
 
-	var searchResult SearchResult
-	err = json.Unmarshal(body, &searchResult)
-	if err != nil {
-		log.Println(fmt.Sprintf("Error parsing JSON: %v", err))
+	// Read and parse response
+	var response Response
+	decoder := json.NewDecoder(resp.Body)
+	if err := decoder.Decode(&response); err != nil {
+		fmt.Fprintf(os.Stderr, "Error parsing JSON: %v\n", err)
 		os.Exit(1)
 	}
 
-	currentResultLinks := make(map[string]int)
-	for _, result := range searchResult.OrganicResults {
-		currentResultLinks[result.Link] = result.Position
+	// Convert API results to our Result format (without favicon)
+	newResults := make([]Result, 0, len(response.OrganicResults))
+	for _, apiResult := range response.OrganicResults {
+		newResults = append(newResults, Result{
+			Position:      apiResult.Position,
+			Title:         apiResult.Title,
+			Link:          apiResult.Link,
+			RedirectLink:  apiResult.RedirectLink,
+			DisplayedLink: apiResult.DisplayedLink,
+			Snippet:       apiResult.Snippet,
+			Source:        apiResult.Source,
+		})
 	}
+	existingResults := loadExistingResults(outFile)
 
-	tempFile := *fileFlag + ".tmp"
-	outputFile, err := os.Create(tempFile)
-	if err != nil {
-		log.Println(fmt.Sprintf("Error creating temp file: %v", err))
-		os.Exit(1)
-	}
-	defer outputFile.Close()
+	// Find added and deleted results
+	added, deleted := compareResults(existingResults, newResults)
 
-	writer := bufio.NewWriter(outputFile)
-	newResultsFound := false
-
-	existingResults := make(map[string]string)
-	orderedResults := []ResultEntry{}
-	existingFile, err := os.Open(*fileFlag)
-	if err != nil && !os.IsNotExist(err) {
-		log.Println(fmt.Sprintf("Error opening existing file: %v", err))
-		os.Exit(1)
-	}
-	if err == nil {
-		defer existingFile.Close()
-		scanner := bufio.NewScanner(existingFile)
-		for scanner.Scan() {
-			line := scanner.Text()
-			var result map[string]interface{}
-			if err := json.Unmarshal([]byte(line), &result); err == nil {
-				if link, ok := result["link"].(string); ok {
-					if position, exists := currentResultLinks[link]; exists {
-						existingResults[link] = line
-						orderedResults = append(orderedResults, ResultEntry{
-							Position: position,
-							Line:     line,
-						})
-					} else {
-						title := "Unknown Title"
-						for _, result := range searchResult.OrganicResults {
-							if result.Link == link {
-								title = result.Title
-								break
-							}
-						}
-						fmt.Printf("Deleted result: %s | %s\n", title, link)
-						syslogWriter.Info(fmt.Sprintf("Deleted result: %s | %s", title, link))
-					}
-				}
+	// If changes detected, update the file
+	if len(added) > 0 || len(deleted) > 0 {
+		// Display messages for deleted results
+		for _, result := range deleted {
+			msg := fmt.Sprintf("Deleted result: %s | %s", result.Title, result.Link)
+			fmt.Println(msg)
+			if syslogWriter != nil {
+				syslogWriter.Notice(msg)
 			}
 		}
-	}
 
-	orderedResults = sortResultsByPosition(orderedResults)
-
-	for _, entry := range orderedResults {
-		writer.WriteString(entry.Line + "\n")
-	}
-
-	newResults := []ResultEntry{}
-	for _, result := range searchResult.OrganicResults {
-		if _, exists := existingResults[result.Link]; !exists {
-			jsonResult, err := json.Marshal(result)
-			if err != nil {
-				log.Printf("Error marshaling result: %v", err)
-				continue
+		// Display messages for added results
+		for _, result := range added {
+			msg := fmt.Sprintf("New result: %s | %s", result.Title, result.Link)
+			fmt.Println(msg)
+			if syslogWriter != nil {
+				syslogWriter.Notice(msg)
 			}
-
-			newResults = append(newResults, ResultEntry{
-				Position: result.Position,
-				Line:     string(jsonResult),
-			})
-			fmt.Printf("New result: %s | %s\n", result.Title, result.Link)
-			syslogWriter.Info(fmt.Sprintf("New result: %s | %s", result.Title, result.Link))
-			newResultsFound = true
 		}
+
+		// Create final result set
+		finalResults := make([]Result, 0)
+		for _, result := range newResults {
+			finalResults = append(finalResults, result)
+		}
+
+		// Sort by position
+		sort.Slice(finalResults, func(i, j int) bool {
+			return finalResults[i].Position < finalResults[j].Position
+		})
+
+		// Save results
+		saveResults(outFile, finalResults)
+
+		// Display summary
+		summary := fmt.Sprintf("Changes: %d results deleted, %d results added, %d existing results, %d total results",
+			len(deleted), len(added), len(newResults)-len(added), len(newResults))
+		fmt.Println(summary)
+		if syslogWriter != nil {
+			syslogWriter.Notice(summary)
+		}
+		
+		// Display request URL if verbose mode is enabled
+		if verbose {
+			fmt.Printf("Request URL: %s\n", requestURL)
+		}
+
+		// Exit with code 2 if changes were detected
+		os.Exit(2)
+	}
+}
+
+// loadExistingResults loads results from the specified file
+func loadExistingResults(filePath string) []Result {
+	file, err := os.Open(filePath)
+	if os.IsNotExist(err) {
+		return []Result{}
+	}
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: Could not open existing file: %v\n", err)
+		return []Result{}
+	}
+	defer file.Close()
+
+	var results []Result
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if line == "" {
+			continue
+		}
+
+		var result Result
+		if err := json.Unmarshal([]byte(line), &result); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: Invalid JSON in file: %v\n", err)
+			continue
+		}
+		results = append(results, result)
 	}
 
-	newResults = sortResultsByPosition(newResults)
-	for _, entry := range newResults {
-		writer.WriteString(entry.Line + "\n")
+	if err := scanner.Err(); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: Error reading file: %v\n", err)
+	}
+
+	return results
+}
+
+// saveResults saves results to the specified file
+func saveResults(filePath string, results []Result) {
+	file, err := os.Create(filePath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error creating output file: %v\n", err)
+		os.Exit(1)
+	}
+	defer file.Close()
+
+	writer := bufio.NewWriter(file)
+
+	for _, result := range results {
+		resultJSON, err := json.Marshal(result)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error encoding result: %v\n", err)
+			continue
+		}
+		writer.Write(resultJSON)
+		writer.WriteString("\n")
 	}
 
 	writer.Flush()
-	outputFile.Close()
+}
 
-	err = os.Rename(tempFile, *fileFlag)
-	if err != nil {
-		log.Println(fmt.Sprintf("Error replacing file: %v", err))
-		os.Exit(1)
+// compareResults compares existing and new results to find added and deleted items
+func compareResults(existing, new []Result) (added, deleted []Result) {
+	// Build maps for quick lookup
+	existingMap := make(map[string]Result)
+	for _, result := range existing {
+		existingMap[result.Link] = result
 	}
 
-	if newResultsFound {
-		os.Exit(2)
+	newMap := make(map[string]Result)
+	for _, result := range new {
+		newMap[result.Link] = result
 	}
+
+	// Find added results
+	for link, result := range newMap {
+		if _, exists := existingMap[link]; !exists {
+			added = append(added, result)
+		}
+	}
+
+	// Find deleted results
+	for link, result := range existingMap {
+		if _, exists := newMap[link]; !exists {
+			deleted = append(deleted, result)
+		}
+	}
+
+	return added, deleted
 }
