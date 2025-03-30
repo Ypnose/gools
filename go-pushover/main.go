@@ -74,13 +74,23 @@ func main() {
 		log.Println("  -message string")
 		log.Println("    Content of the message (required)")
 		log.Println("  -user string")
-		log.Println("    Username for authentication (required)")
+		log.Println("    Username for authentication (required or use PUSH_USER env var)")
 		log.Println("  -token string")
-		log.Println("    Authentication token (required)")
+		log.Println("    Authentication token (required or use PUSH_TOKEN env var)")
 		log.Println("  -debug")
 		log.Println("    Enable debug logging")
 	}
 	flag.Parse()
+
+	userValue := *user
+	if userValue == "" {
+		userValue = os.Getenv("PUSH_USER")
+	}
+
+	tokenValue := *token
+	if tokenValue == "" {
+		tokenValue = os.Getenv("PUSH_TOKEN")
+	}
 
 	missing := []string{}
 	if *title == "" {
@@ -89,10 +99,10 @@ func main() {
 	if *message == "" {
 		missing = append(missing, "message")
 	}
-	if *user == "" {
+	if userValue == "" {
 		missing = append(missing, "user")
 	}
-	if *token == "" {
+	if tokenValue == "" {
 		missing = append(missing, "token")
 	}
 
@@ -107,8 +117,8 @@ func main() {
 	}
 
 	data := url.Values{
-		"user":      {*user},
-		"token":     {*token},
+		"user":      {userValue},
+		"token":     {tokenValue},
 		"timestamp": {strconv.FormatInt(time.Now().Unix(), 10)},
 		"title":     {*title},
 		"message":   {*message},
