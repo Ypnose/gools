@@ -1,11 +1,13 @@
 package main
 
 import (
+	"crypto/tls"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"net/http"
 	"os"
+	"time"
 )
 
 type TempoResponse struct {
@@ -40,8 +42,38 @@ func main() {
 	}
 }
 
+func createSecureHTTPClient() *http.Client {
+	tlsConfig := &tls.Config{
+		MinVersion: tls.VersionTLS13,
+		CipherSuites: []uint16{
+			// Most secure TLS 1.3 cipher suites
+			tls.TLS_AES_256_GCM_SHA384,
+			tls.TLS_CHACHA20_POLY1305_SHA256,
+		},
+		InsecureSkipVerify: false,
+	}
+
+	transport := &http.Transport{
+		TLSClientConfig:       tlsConfig,
+		DisableCompression:    false,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ResponseHeaderTimeout: 10 * time.Second,
+		ExpectContinueTimeout: 1 * time.Second,
+		MaxIdleConns:          10,
+		MaxIdleConnsPerHost:   5,
+		IdleConnTimeout:       90 * time.Second,
+	}
+
+	return &http.Client{
+		Transport: transport,
+		Timeout:   15 * time.Second,
+	}
+}
+
 func getTempoData(endpoint string) (*TempoResponse, error) {
-	resp, err := http.Get("https://www.api-couleur-tempo.fr/api/jourTempo/" + endpoint)
+	client := createSecureHTTPClient()
+
+	resp, err := client.Get("https://www.api-couleur-tempo.fr/api/jourTempo/" + endpoint)
 	if err != nil {
 		return nil, err
 	}
@@ -59,6 +91,8 @@ func printColor(endpoint string) {
 		if color, ok := colors[tempo.CodeJour]; ok {
 			fmt.Println(color)
 		}
+	} else {
+		fmt.Fprintf(os.Stderr, "Erreur: %v\n", err)
 	}
 }
 
@@ -67,5 +101,7 @@ func printFull(endpoint, period string) {
 		if color, ok := colors[tempo.CodeJour]; ok {
 			fmt.Printf("Tempo %s (%s): %s\n", period, tempo.DateJour, color)
 		}
+	} else {
+		fmt.Fprintf(os.Stderr, "Erreur: %v\n", err)
 	}
 }
