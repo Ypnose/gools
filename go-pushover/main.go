@@ -12,9 +12,13 @@ import (
 )
 
 const (
-	CheckURL = "https://pushover.net/"
-	URL      = "https://api.pushover.net/1/messages.json"
+	CheckURL   = "https://pushover.net/"
+	URL        = "https://api.pushover.net/1/messages.json"
 	maxRetries = 4
+
+	// Default credentials - can be set directly here
+	defaultUser  = "" // Add your user ID here if desired
+	defaultToken = "" // Add your token here if desired
 )
 
 var transport = &http.Transport{
@@ -63,8 +67,8 @@ func checkNetworkAccess(debug bool) bool {
 func main() {
 	title := flag.String("title", "", "Title of the message (required)")
 	message := flag.String("message", "", "Content of the message (required)")
-	user := flag.String("user", "", "Username for authentication (required)")
-	token := flag.String("token", "", "Authentication token (required)")
+	user := flag.String("user", defaultUser, "Username for authentication (required if not set in code)")
+	token := flag.String("token", defaultToken, "Authentication token (required if not set in code)")
 	debug := flag.Bool("debug", false, "Enable debug logging")
 
 	flag.Usage = func() {
@@ -82,16 +86,6 @@ func main() {
 	}
 	flag.Parse()
 
-	userValue := *user
-	if userValue == "" {
-		userValue = os.Getenv("PUSH_USER")
-	}
-
-	tokenValue := *token
-	if tokenValue == "" {
-		tokenValue = os.Getenv("PUSH_TOKEN")
-	}
-
 	missing := []string{}
 	if *title == "" {
 		missing = append(missing, "title")
@@ -99,10 +93,10 @@ func main() {
 	if *message == "" {
 		missing = append(missing, "message")
 	}
-	if userValue == "" {
+	if *user == "" {
 		missing = append(missing, "user")
 	}
-	if tokenValue == "" {
+	if *token == "" {
 		missing = append(missing, "token")
 	}
 
@@ -117,8 +111,8 @@ func main() {
 	}
 
 	data := url.Values{
-		"user":      {userValue},
-		"token":     {tokenValue},
+		"user":      {*user},
+		"token":     {*token},
 		"timestamp": {strconv.FormatInt(time.Now().Unix(), 10)},
 		"title":     {*title},
 		"message":   {*message},
