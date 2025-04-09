@@ -3,6 +3,7 @@ package main
 import (
 	"crypto/tls"
 	"flag"
+	"fmt"
 	"log"
 	"net/http"
 	"net/url"
@@ -72,17 +73,8 @@ func main() {
 	debug := flag.Bool("debug", false, "Enable debug logging")
 
 	flag.Usage = func() {
-		log.Printf("Usage: %s\n", os.Args[0])
-		log.Println("  -title string")
-		log.Println("    Title of the message (required)")
-		log.Println("  -message string")
-		log.Println("    Content of the message (required)")
-		log.Println("  -user string")
-		log.Println("    Username for authentication (required or use PUSH_USER env var)")
-		log.Println("  -token string")
-		log.Println("    Authentication token (required or use PUSH_TOKEN env var)")
-		log.Println("  -debug")
-		log.Println("    Enable debug logging")
+		fmt.Fprintf(flag.CommandLine.Output(), "Usage: %s\n", os.Args[0])
+		flag.PrintDefaults()
 	}
 	flag.Parse()
 
