@@ -65,11 +65,11 @@ func checkNetworkAccess(debug bool) bool {
 }
 
 func main() {
-	title := flag.String("title", "", "Title of the message (required)")
-	message := flag.String("message", "", "Content of the message (required)")
-	user := flag.String("user", defaultUser, "Username for authentication (required if not set in code)")
-	token := flag.String("token", defaultToken, "Authentication token (required if not set in code)")
-	debug := flag.Bool("debug", false, "Enable debug logging")
+	title := flag.String("title", "", "")
+	message := flag.String("message", "", "")
+	user := flag.String("user", defaultUser, "")
+	token := flag.String("token", defaultToken, "")
+	debug := flag.Bool("debug", false, "")
 
 	flag.Usage = func() {
 		log.Printf("Usage: %s\n", os.Args[0])
@@ -78,9 +78,9 @@ func main() {
 		log.Println("  -message string")
 		log.Println("    Content of the message (required)")
 		log.Println("  -user string")
-		log.Println("    Username for authentication (required or use PUSH_USER env var)")
+		log.Println("    Username for authentication (required if not set in code)")
 		log.Println("  -token string")
-		log.Println("    Authentication token (required or use PUSH_TOKEN env var)")
+		log.Println("    Authentication token (required if not set in code)")
 		log.Println("  -debug")
 		log.Println("    Enable debug logging")
 	}
