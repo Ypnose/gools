@@ -7,7 +7,8 @@ go_build() {
 	du -sh "$t"
 }
 
-for t in *; do
+for t in ${1:-*}; do
+	t="${t%%/*}"
 	if [ ! -d "$t" ] || [ ! -f "${t}/main.go" ]; then
 		continue
 	fi
