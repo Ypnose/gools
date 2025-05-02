@@ -5,7 +5,6 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
-	"crypto/sha512"
 	"flag"
 	"fmt"
 	"html/template"
@@ -19,6 +18,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"golang.org/x/crypto/argon2"
 )
 
 var (
@@ -187,12 +188,12 @@ func timeoutMiddleware(next http.HandlerFunc) http.HandlerFunc {
 }
 
 func deriveKey(password string, salt []byte) []byte {
-	// Multiple iterations of SHA-512 for key stretching
-	key := sha512.Sum512(append([]byte(password), salt...))
-	for i := 0; i < 250000; i++ {
-		key = sha512.Sum512(append(key[:], salt...))
-	}
-	return key[:32] // First 32 bytes for AES-256
+	// Argon2id parameters:
+	// - 4 passes over memory
+	// - 64MB memory usage
+	// - 2 threads of parallelism
+	// - 32-byte output key for AES-256
+	return argon2.IDKey([]byte(password), salt, 4, 64*1024, 2, 32)
 }
 
 func encrypt(data []byte, password string) ([]byte, error) {
