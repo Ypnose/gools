@@ -1,6 +1,7 @@
 package main
 
 import (
+	"archive/zip"
 	"compress/gzip"
 	"encoding/xml"
 	"flag"
@@ -140,6 +141,43 @@ func main() {
 		}
 		defer gzReader.Close()
 		reader = gzReader
+	}
+
+	// Check if file is zipped
+	if strings.HasSuffix(strings.ToLower(filename), ".zip") {
+		fileInfo, err := file.Stat()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error getting file info: %v\n", err)
+			os.Exit(1)
+		}
+
+		zipReader, err := zip.NewReader(file, fileInfo.Size())
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error opening zip file: %v\n", err)
+			os.Exit(1)
+		}
+
+		// Find the first XML file in the zip
+		var xmlFile *zip.File
+		for _, f := range zipReader.File {
+			if strings.HasSuffix(strings.ToLower(f.Name), ".xml") {
+				xmlFile = f
+				break
+			}
+		}
+
+		if xmlFile == nil {
+			fmt.Fprintf(os.Stderr, "No XML file found in zip archive\n")
+			os.Exit(1)
+		}
+
+		xmlReader, err := xmlFile.Open()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error opening XML file from zip: %v\n", err)
+			os.Exit(1)
+		}
+		defer xmlReader.Close()
+		reader = xmlReader
 	}
 
 	data, err := io.ReadAll(reader)
