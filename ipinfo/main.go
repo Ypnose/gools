@@ -1,10 +1,12 @@
 package main
 
 import (
+	"crypto/tls"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
+	"time"
 )
 
 func main() {
@@ -14,14 +16,16 @@ func main() {
 		return
 	}
 
+	client := createSecureClient()
+
 	req, err := http.NewRequest(http.MethodGet,
-		"http://ipinfo.io"+getPath(args), nil)
+		"https://ipinfo.io"+getPath(args), nil)
 	if err != nil {
 		die(err)
 	}
-	req.Header.Set("User-Agent", "curl/8.11.0")
+	req.Header.Set("User-Agent", "curl/8.14.1")
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		die(err)
 	}
@@ -31,6 +35,42 @@ func main() {
 		die(err)
 	}
 	fmt.Println()
+}
+
+func createSecureClient() *http.Client {
+	tlsConfig := &tls.Config{
+		MinVersion: tls.VersionTLS13,
+		MaxVersion: tls.VersionTLS13,
+		CipherSuites: []uint16{
+			tls.TLS_AES_256_GCM_SHA384,
+			tls.TLS_CHACHA20_POLY1305_SHA256,
+		},
+		InsecureSkipVerify: false,
+		ClientAuth:         tls.NoClientCert,
+		PreferServerCipherSuites: true,
+		// Disable session tickets for perfect forward secrecy
+		SessionTicketsDisabled: true,
+	}
+
+	transport := &http.Transport{
+		TLSClientConfig:       tlsConfig,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ResponseHeaderTimeout: 15 * time.Second,
+		MaxIdleConns:          10,
+		IdleConnTimeout:       30 * time.Second,
+	}
+
+	return &http.Client{
+		Transport: transport,
+		Timeout:   30 * time.Second,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			// Limit redirects for security
+			if len(via) >= 3 {
+				return fmt.Errorf("Too many redirects")
+			}
+			return nil
+		},
+	}
 }
 
 func getPath(args []string) string {
