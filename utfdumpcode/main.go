@@ -48,7 +48,7 @@ func main() {
 			if err != nil && os.IsNotExist(err) {
 				// It's not a file, treat as a flag
 				if arg != "-v" {
-					fmt.Fprintf(os.Stderr, "flag provided but not defined: %s\n", arg)
+					fmt.Fprintf(os.Stderr, "Flag provided but not defined: %s\n", arg)
 					printUsage(toolName)
 					os.Exit(1)
 				} else {

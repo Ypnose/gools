@@ -69,7 +69,7 @@ func NewTable(separator rune, screen tcell.Screen) (*Table, error) {
 	if fromStdin {
 		input = os.Stdin
 	} else if len(flag.Args()) != 1 {
-		return nil, fmt.Errorf("please provide a CSV filename")
+		return nil, fmt.Errorf("Please provide a CSV filename")
 	} else if file, err := os.Open(flag.Args()[0]); err != nil {
 		return nil, err
 	} else {
@@ -88,7 +88,7 @@ func NewTable(separator rune, screen tcell.Screen) (*Table, error) {
 		return nil, err
 	}
 	if len(data) == 0 {
-		return nil, fmt.Errorf("empty data")
+		return nil, fmt.Errorf("Empty data")
 	}
 
 	// Remove BOM from the first cell if present

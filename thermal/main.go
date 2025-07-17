@@ -68,7 +68,7 @@ func findThermalSensors() ([]ThermalSensor, []string, error) {
 
 	// Check if thermal path exists
 	if _, err := os.Stat(thermalPath); os.IsNotExist(err) {
-		return nil, nil, fmt.Errorf("thermal subsystem path %s does not exist", thermalPath)
+		return nil, nil, fmt.Errorf("Thermal subsystem path %s does not exist", thermalPath)
 	}
 
 	// Find all thermal zone directories
@@ -130,7 +130,7 @@ func readThermalZone(zonePath string) (ThermalSensor, error) {
 	tempStr := strings.TrimSpace(string(tempBytes))
 	temp, err := strconv.ParseFloat(tempStr, 64)
 	if err != nil {
-		return sensor, fmt.Errorf("invalid temperature value: %s", tempStr)
+		return sensor, fmt.Errorf("Invalid temperature value: %s", tempStr)
 	}
 	sensor.Value = temp
 

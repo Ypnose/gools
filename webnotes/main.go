@@ -224,7 +224,7 @@ func encrypt(data []byte, password string) ([]byte, error) {
 
 func decrypt(data []byte, password string) ([]byte, error) {
 	if len(data) < 32 {
-		return nil, fmt.Errorf("encrypted data too short")
+		return nil, fmt.Errorf("Encrypted data too short")
 	}
 
 	salt := data[:32]
@@ -243,7 +243,7 @@ func decrypt(data []byte, password string) ([]byte, error) {
 
 	nonceSize := gcm.NonceSize()
 	if len(data) < nonceSize {
-		return nil, fmt.Errorf("encrypted data too short")
+		return nil, fmt.Errorf("Encrypted data too short")
 	}
 
 	nonce, ciphertext := data[:nonceSize], data[nonceSize:]

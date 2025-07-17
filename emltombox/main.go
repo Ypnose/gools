@@ -77,7 +77,7 @@ func main() {
 
 func validatePath(path string) error {
 	if strings.ContainsAny(path, "\x00") {
-		return fmt.Errorf("invalid character in path")
+		return fmt.Errorf("Invalid character in path")
 	}
 
 	dir := "."
@@ -88,13 +88,13 @@ func validatePath(path string) error {
 	info, err := os.Stat(dir)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return fmt.Errorf("directory does not exist: %s", dir)
+			return fmt.Errorf("Directory does not exist: %s", dir)
 		}
-		return fmt.Errorf("cannot access directory: %s", dir)
+		return fmt.Errorf("Cannot access directory: %s", dir)
 	}
 
 	if !info.IsDir() {
-		return fmt.Errorf("not a directory: %s", dir)
+		return fmt.Errorf("Not a directory: %s", dir)
 	}
 
 	return nil
@@ -104,12 +104,12 @@ func convertEMLToMBOX(emlPath string, writer *bufio.Writer) (messageInfo, error)
 	info := messageInfo{filename: emlPath}
 
 	if strings.ContainsAny(emlPath, "\x00") {
-		return info, fmt.Errorf("invalid character in input path")
+		return info, fmt.Errorf("Invalid character in input path")
 	}
 
 	emlFile, err := os.OpenFile(emlPath, os.O_RDONLY, 0)
 	if err != nil {
-		return info, fmt.Errorf("cannot open EML file: %v", err)
+		return info, fmt.Errorf("Cannot open EML file: %v", err)
 	}
 	defer emlFile.Close()
 
@@ -132,7 +132,7 @@ func convertEMLToMBOX(emlPath string, writer *bufio.Writer) (messageInfo, error)
 		}
 	}
 	if err := scanner.Err(); err != nil {
-		return info, fmt.Errorf("error reading EML file: %v", err)
+		return info, fmt.Errorf("Error reading EML file: %v", err)
 	}
 
 	if from == "" {
@@ -158,12 +158,12 @@ func convertEMLToMBOX(emlPath string, writer *bufio.Writer) (messageInfo, error)
 
 	// Write MBOX From_ line
 	if _, err := fmt.Fprintf(writer, "From %s %s\n", from, date.Format("Mon Jan 2 15:04:05 2006")); err != nil {
-		return info, fmt.Errorf("cannot write From_ line: %v", err)
+		return info, fmt.Errorf("Cannot write From_ line: %v", err)
 	}
 
 	// Reset to start of file for full copy
 	if _, err := emlFile.Seek(0, 0); err != nil {
-		return info, fmt.Errorf("cannot reset file position: %v", err)
+		return info, fmt.Errorf("Cannot reset file position: %v", err)
 	}
 
 	// Full copy of EML content
@@ -177,17 +177,17 @@ func convertEMLToMBOX(emlPath string, writer *bufio.Writer) (messageInfo, error)
 			line = ">" + line
 		}
 		if _, err := fmt.Fprintln(writer, line); err != nil {
-			return info, fmt.Errorf("cannot write line: %v", err)
+			return info, fmt.Errorf("Cannot write line: %v", err)
 		}
 	}
 
 	if err := scanner.Err(); err != nil {
-		return info, fmt.Errorf("error reading EML content: %v", err)
+		return info, fmt.Errorf("Error reading EML content: %v", err)
 	}
 
 	// Add blank line between messages
 	if _, err := fmt.Fprintln(writer); err != nil {
-		return info, fmt.Errorf("cannot write message separator: %v", err)
+		return info, fmt.Errorf("Cannot write message separator: %v", err)
 	}
 
 	return info, nil
@@ -196,7 +196,7 @@ func convertEMLToMBOX(emlPath string, writer *bufio.Writer) (messageInfo, error)
 func verifyOrder(mboxPath string, infos []messageInfo) error {
 	file, err := os.Open(mboxPath)
 	if err != nil {
-		return fmt.Errorf("cannot open mbox for verification: %v", err)
+		return fmt.Errorf("Cannot open mbox for verification: %v", err)
 	}
 	defer file.Close()
 
@@ -209,14 +209,14 @@ func verifyOrder(mboxPath string, infos []messageInfo) error {
 		line := scanner.Text()
 		if strings.HasPrefix(line, "From ") {
 			if !strings.Contains(line, infos[idx].from) {
-				return fmt.Errorf("message order mismatch at position %d", idx+1)
+				return fmt.Errorf("Message order mismatch at position %d", idx+1)
 			}
 			idx++
 		}
 	}
 
 	if idx != len(infos) {
-		return fmt.Errorf("incorrect number of messages in output file")
+		return fmt.Errorf("Incorrect number of messages in output file")
 	}
 
 	return scanner.Err()

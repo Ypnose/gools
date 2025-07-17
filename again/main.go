@@ -77,33 +77,33 @@ func (sv *SecurityValidator) IsSecureCommand(cmd string) error {
 	defer sv.mu.RUnlock()
 
 	if len(cmd) == 0 || len(cmd) > maxInputLength {
-		return fmt.Errorf("invalid command length")
+		return fmt.Errorf("Invalid command length")
 	}
 
 	cmdLower := strings.ToLower(cmd)
 
 	for _, pattern := range dangerousPatterns {
 		if strings.Contains(cmdLower, strings.ToLower(pattern)) {
-			return fmt.Errorf("dangerous pattern detected: %s", pattern)
+			return fmt.Errorf("Dangerous pattern detected: %s", pattern)
 		}
 	}
 
 	for _, char := range shellMetacharacters {
 		if strings.ContainsRune(cmd, char) {
-			return fmt.Errorf("shell metacharacter detected: %c", char)
+			return fmt.Errorf("Shell metacharacter detected: %c", char)
 		}
 	}
 
 	for _, shell := range forbiddenShells {
 		shellPattern := regexp.MustCompile(fmt.Sprintf(`(?i)\b%s\b`, regexp.QuoteMeta(shell)))
 		if shellPattern.MatchString(cmdLower) {
-			return fmt.Errorf("shell or interpreter detected: %s", shell)
+			return fmt.Errorf("Shell or interpreter detected: %s", shell)
 		}
 	}
 
 	for _, r := range cmd {
 		if !unicode.IsPrint(r) && !unicode.IsSpace(r) {
-			return fmt.Errorf("non-printable character detected")
+			return fmt.Errorf("Non-printable character detected")
 		}
 	}
 
@@ -119,12 +119,12 @@ type SafetyChecker struct {
 func NewSafetyChecker() (*SafetyChecker, error) {
 	execPath, err := os.Executable()
 	if err != nil {
-		return nil, fmt.Errorf("failed to get executable path: %v", err)
+		return nil, fmt.Errorf("Failed to get executable path: %v", err)
 	}
 
 	absPath, err := filepath.Abs(execPath)
 	if err != nil {
-		return nil, fmt.Errorf("failed to resolve absolute path: %v", err)
+		return nil, fmt.Errorf("Failed to resolve absolute path: %v", err)
 	}
 
 	realPath, err := filepath.EvalSymlinks(absPath)
@@ -151,7 +151,7 @@ func (sc *SafetyChecker) IsSafeCommand(cmd string) error {
 	for _, shell := range forbiddenShells {
 		shellPattern := regexp.MustCompile(fmt.Sprintf(`(?i)^.*%s.*$`, regexp.QuoteMeta(shell)))
 		if shellPattern.MatchString(filepath.Base(cmdLower)) {
-			return fmt.Errorf("shell or interpreter not allowed: %s", shell)
+			return fmt.Errorf("Shell or interpreter not allowed: %s", shell)
 		}
 	}
 
@@ -159,7 +159,7 @@ func (sc *SafetyChecker) IsSafeCommand(cmd string) error {
 	cmdBase := filepath.Base(cmd)
 	for _, pattern := range dangerousPatterns {
 		if strings.Contains(strings.ToLower(cmdBase), strings.ToLower(pattern)) {
-			return fmt.Errorf("dangerous pattern detected: %s", pattern)
+			return fmt.Errorf("Dangerous pattern detected: %s", pattern)
 		}
 	}
 
@@ -170,12 +170,12 @@ func (sc *SafetyChecker) IsSafeCommand(cmd string) error {
 	if strings.Contains(cmd, "/") || strings.Contains(cmd, "\\") {
 		cmdPath, err = filepath.Abs(cmd)
 		if err != nil {
-			return fmt.Errorf("failed to resolve path: %v", err)
+			return fmt.Errorf("Failed to resolve path: %v", err)
 		}
 	} else {
 		cmdPath, err = exec.LookPath(cmd)
 		if err != nil {
-			return fmt.Errorf("command not found: %s", cmd)
+			return fmt.Errorf("Command not found: %s", cmd)
 		}
 	}
 
@@ -185,20 +185,20 @@ func (sc *SafetyChecker) IsSafeCommand(cmd string) error {
 	}
 
 	if cmdPath == sc.selfPath {
-		return fmt.Errorf("cannot run %s recursively", getToolName())
+		return fmt.Errorf("Cannot run %s recursively", getToolName())
 	}
 
 	info, err := os.Stat(cmdPath)
 	if err != nil {
-		return fmt.Errorf("cannot access command: %v", err)
+		return fmt.Errorf("Cannot access command: %v", err)
 	}
 
 	if info.IsDir() {
-		return fmt.Errorf("command path is a directory")
+		return fmt.Errorf("Command path is a directory")
 	}
 
 	if info.Mode()&0111 == 0 {
-		return fmt.Errorf("command is not executable")
+		return fmt.Errorf("Command is not executable")
 	}
 
 	return nil
@@ -226,17 +226,17 @@ func (v *InputValidator) Validate(input string) ([]string, error) {
 	}
 
 	if len(input) > maxInputLength {
-		return nil, fmt.Errorf("input exceeds maximum length")
+		return nil, fmt.Errorf("Input exceeds maximum length")
 	}
 
 	args := strings.Fields(input)
 	for _, arg := range args {
 		if strings.Contains(arg, "/") || strings.Contains(arg, "\\") {
-			return nil, fmt.Errorf("path separators not allowed in arguments")
+			return nil, fmt.Errorf("Path separators not allowed in arguments")
 		}
 
 		if err := v.securityValidator.IsSecureCommand(arg); err != nil {
-			return nil, fmt.Errorf("invalid argument: %v", err)
+			return nil, fmt.Errorf("Invalid argument: %v", err)
 		}
 	}
 
@@ -251,12 +251,12 @@ type CommandExecutor struct {
 func NewCommandExecutor(baseCmd string) (*CommandExecutor, error) {
 	startDir, err := os.Getwd()
 	if err != nil {
-		return nil, fmt.Errorf("failed to get working directory: %v", err)
+		return nil, fmt.Errorf("Failed to get working directory: %v", err)
 	}
 
 	absPath, err := filepath.Abs(startDir)
 	if err != nil {
-		return nil, fmt.Errorf("failed to resolve absolute path: %v", err)
+		return nil, fmt.Errorf("Failed to resolve absolute path: %v", err)
 	}
 
 	return &CommandExecutor{
@@ -278,21 +278,21 @@ func (e *CommandExecutor) Execute(ctx context.Context, args []string) error {
 
 	currentDir, err := os.Getwd()
 	if err != nil {
-		return fmt.Errorf("failed to verify working directory: %v", err)
+		return fmt.Errorf("Failed to verify working directory: %v", err)
 	}
 
 	absCurrentDir, err := filepath.Abs(currentDir)
 	if err != nil {
-		return fmt.Errorf("failed to resolve current directory: %v", err)
+		return fmt.Errorf("Failed to resolve current directory: %v", err)
 	}
 
 	if absCurrentDir != e.workingDir {
-		return fmt.Errorf("working directory has been changed, aborting")
+		return fmt.Errorf("Working directory has been changed, aborting")
 	}
 
 	err = cmd.Run()
 	if ctx.Err() == context.DeadlineExceeded {
-		return fmt.Errorf("command timed out after %v", commandTimeout)
+		return fmt.Errorf("Command timed out after %v", commandTimeout)
 	}
 	return err
 }

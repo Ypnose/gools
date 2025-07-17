@@ -18,7 +18,7 @@ const usageMsg = "Usage: vipe \nAllows editing piped data in your $EDITOR"
 func generateRandomName() string {
 	bytes := make([]byte, 16)
 	if _, err := rand.Read(bytes); err != nil {
-		fatal("random generation failed:", err)
+		fatal("Random generation failed:", err)
 	}
 	return hex.EncodeToString(bytes)
 }
@@ -32,7 +32,7 @@ func main() {
 	if len(os.Args) > 1 {
 		arg := os.Args[1]
 		if strings.HasPrefix(arg, "-") && arg != "-help" {
-			fmt.Fprintf(os.Stderr, "flag provided but not defined: %s\n%s\n", arg, usageMsg)
+			fmt.Fprintf(os.Stderr, "Flag provided but not defined: %s\n%s\n", arg, usageMsg)
 			os.Exit(1)
 		}
 	}
@@ -55,7 +55,7 @@ func main() {
 	randName := generateRandomName()
 	tmpfile, err := os.CreateTemp("", "vipe-"+randName+".*")
 	if err != nil {
-		fatal("tempfile creation failed:", err)
+		fatal("Tempfile creation failed:", err)
 	}
 	tmpPath := tmpfile.Name()
 
@@ -86,7 +86,7 @@ func main() {
 	tty, err := os.OpenFile("/dev/tty", os.O_RDWR, 0)
 	if err != nil {
 		if os.IsNotExist(err) {
-			fatal("no TTY available:", err)
+			fatal("No TTY available:", err)
 		}
 		if os.IsPermission(err) {
 			fatal("TTY access denied:", err)
@@ -97,7 +97,7 @@ func main() {
 	oldStdin, oldStdout := os.Stdin, os.Stdout
 	defer func() {
 		if err := tty.Close(); err != nil {
-			fmt.Fprintf(os.Stderr, "warning: failed to close TTY: %v\n", err)
+			fmt.Fprintf(os.Stderr, "Warning: failed to close TTY: %v\n", err)
 		}
 		os.Stdin, os.Stdout = oldStdin, oldStdout
 	}()
@@ -110,7 +110,7 @@ func main() {
 
 	editor := getEditor()
 	if editor == "" {
-		fatal("no editor found:", fmt.Errorf("EDITOR/VISUAL not set and vi not available"))
+		fatal("No editor found:", fmt.Errorf("EDITOR/VISUAL not set and vi not available"))
 	}
 
 	editorParts := strings.Fields(editor)
@@ -121,17 +121,17 @@ func main() {
 		if exitErr, ok := err.(*exec.ExitError); ok {
 			os.Exit(exitErr.ExitCode())
 		}
-		fatal("editor failed:", err)
+		fatal("Editor failed:", err)
 	}
 
 	edited, err := os.OpenFile(tmpPath, os.O_RDONLY, 0600)
 	if err != nil {
-		fatal("result open failed:", err)
+		fatal("Result open failed:", err)
 	}
 	defer edited.Close()
 
 	if _, err := io.Copy(oldStdout, edited); err != nil {
-		fatal("output failed:", err)
+		fatal("Output failed:", err)
 	}
 }
 

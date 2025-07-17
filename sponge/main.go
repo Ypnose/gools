@@ -37,11 +37,11 @@ func setupSecureTempFile() (*os.File, string, error) {
 	}
 
 	if !filepath.IsAbs(tmpdir) {
-		return nil, "", fmt.Errorf("temporary directory path must be absolute")
+		return nil, "", fmt.Errorf("Temporary directory path must be absolute")
 	}
 
 	if err := os.MkdirAll(tmpdir, 0700); err != nil {
-		return nil, "", fmt.Errorf("failed to create temp directory: %v", err)
+		return nil, "", fmt.Errorf("Failed to create temp directory: %v", err)
 	}
 
 	// Generate random string for filename (16 characters)
@@ -55,7 +55,7 @@ func setupSecureTempFile() (*os.File, string, error) {
 
 	tmpfile, err := os.OpenFile(tmpname, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0600)
 	if err != nil {
-		return nil, "", fmt.Errorf("failed to create temp file: %v", err)
+		return nil, "", fmt.Errorf("Failed to create temp file: %v", err)
 	}
 
 	return tmpfile, tmpname, nil
@@ -105,7 +105,7 @@ func main() {
 			usage()
 			os.Exit(0)
 		}
-		fmt.Fprintf(os.Stderr, "flag provided but not defined: %s\n", os.Args[1])
+		fmt.Fprintf(os.Stderr, "Flag provided but not defined: %s\n", os.Args[1])
 		usage()
 		os.Exit(1)
 	}
