@@ -20,12 +20,6 @@ type ThermalSensor struct {
 }
 
 func main() {
-	// Prevent running as root
-	if os.Geteuid() == 0 {
-		fmt.Fprintf(os.Stderr, "This program must not be run as root for security reasons\n")
-		os.Exit(2)
-	}
-
 	sensors, warnings, err := findThermalSensors()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error finding thermal sensors: %v\n", err)
@@ -37,27 +31,15 @@ func main() {
 		return
 	}
 
-	fmt.Println("Thermal sensors found:")
-	fmt.Println("======================")
 	for i, sensor := range sensors {
-		fmt.Printf("%2d. Name: %s\n", i+1, sensor.Name)
-		fmt.Printf("    Type: %s\n", sensor.Type)
-		fmt.Printf("    Temperature: %.2f°C\n", sensor.Value/1000.0) // Convert from millidegrees to degrees
-		fmt.Printf("    Path: %s\n", sensor.Path)
-		if i < len(sensors)-1 {
-			fmt.Println()
-		}
+		fmt.Printf("%2d. %s (%s): %.2f °C - %s\n", i+1, sensor.Name, sensor.Type, sensor.Value/1000.0, sensor.Path)
 	}
-	
+
 	// Print all collected warnings at the end
 	if len(warnings) > 0 {
-		fmt.Fprintf(os.Stderr, "Warnings:\n")
-		for i, warning := range warnings {
-			if i < len(warnings)-1 {
-				fmt.Fprintf(os.Stderr, "- %s\n", warning)
-			} else {
-				fmt.Fprintf(os.Stderr, "- %s", warning)
-			}
+		fmt.Printf("\nWarnings:\n")
+		for _, warning := range warnings {
+			fmt.Fprintf(os.Stderr, "- %s\n", warning)
 		}
 	}
 }
@@ -158,7 +140,7 @@ func readHwmonSensors(hwmonPath string) ([]ThermalSensor, []string, error) {
 	}
 
 	// Cap the number of files to prevent resource exhaustion
-	maxFiles := 100
+	maxFiles := 250
 	if len(tempFiles) > maxFiles {
 		tempFiles = tempFiles[:maxFiles]
 		warnings = append(warnings, fmt.Sprintf("Limited hwmon sensor files to %d for %s", maxFiles, hwmonPath))
