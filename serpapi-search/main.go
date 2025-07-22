@@ -68,7 +68,7 @@ func main() {
 	flag.BoolVar(&verbose, "verbose", false, "")
 
 	usageMessage := fmt.Sprintf("Usage: %s [-file FILE] [-query QUERY] [-location LOCATION] [-verbose]\n", binaryName)
-	
+
 	flag.Usage = func() {
 		fmt.Fprint(os.Stderr, usageMessage)
 	}
@@ -215,7 +215,7 @@ func main() {
 		if syslogWriter != nil {
 			syslogWriter.Notice(summary)
 		}
-		
+
 		// Display request URL if verbose mode is enabled
 		if verbose {
 			fmt.Printf("Request URL: %s\n", requestURL)
