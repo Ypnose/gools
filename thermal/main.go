@@ -32,7 +32,7 @@ func main() {
 	}
 
 	for i, sensor := range sensors {
-		fmt.Printf("%2d. %s (%s): %.2f °C - %s\n", i+1, sensor.Name, sensor.Type, sensor.Value/1000.0, sensor.Path)
+		fmt.Printf("%2d. %s (%s): %.2f°C - %s\n", i+1, sensor.Name, sensor.Type, sensor.Value/1000.0, sensor.Path)
 	}
 
 	// Print all collected warnings at the end
