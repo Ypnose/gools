@@ -193,8 +193,6 @@ func main() {
 		os.Exit(1)
 	}
 
-	fmt.Println("DMARC Report Summary")
-	fmt.Println("====================")
 	fmt.Printf("Organization: %s\n", report.ReportMetadata.OrgName)
 	fmt.Printf("Report ID: %s\n", report.ReportMetadata.ReportID)
 	fmt.Printf("Date Range: %s to %s\n",
