@@ -223,7 +223,7 @@ func printStats(entries []*LDAPEntry) {
 	}
 
 	if len(objectClasses) > 0 {
-		fmt.Println("\nObject classes:")
+		fmt.Println("Object classes:")
 		var classes []string
 		for class := range objectClasses {
 			classes = append(classes, class)
@@ -281,9 +281,7 @@ func main() {
 		return
 	}
 
-	fmt.Println("LDAP Directory Structure:")
-	fmt.Println("========================")
 	printTree(root, "", true, true, "")
-
+	fmt.Println()
 	printStats(entries)
 }
