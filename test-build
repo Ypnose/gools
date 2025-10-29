@@ -20,6 +20,7 @@ for t in ${1:-*}; do
 		CGO_ENABLED=0 go_build
 		GOOS=linux GOARCH=arm64 go_build
 		GOOS=darwin GOARCH=arm64 go_build
+		GOOS=openbsd GOARCH=arm64 go_build
 		sleep 4
 	)
 done
