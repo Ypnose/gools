@@ -23,7 +23,7 @@ func main() {
 	if err != nil {
 		die(err)
 	}
-	req.Header.Set("User-Agent", "curl/8.14.1")
+	req.Header.Set("User-Agent", "curl/8.17.0")
 
 	resp, err := client.Do(req)
 	if err != nil {
