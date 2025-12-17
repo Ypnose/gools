@@ -12,7 +12,7 @@ import (
 )
 
 const (
-	CheckURL   = "https://pushover.net/"
+	CheckURL   = "https://api.pushover.net/"
 	URL        = "https://api.pushover.net/1/messages.json"
 	maxRetries = 4
 
@@ -23,7 +23,7 @@ const (
 
 var transport = &http.Transport{
 	TLSClientConfig: &tls.Config{
-		MinVersion: tls.VersionTLS13,
+		MinVersion: tls.VersionTLS12,
 		MaxVersion: tls.VersionTLS13,
 	},
 	ForceAttemptHTTP2: true,
