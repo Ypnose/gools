@@ -43,7 +43,7 @@ func checkNetworkAccess(debug bool) bool {
 	for i := 0; i < maxRetries; i++ {
 		if debug {
 			log.SetFlags(log.LstdFlags)
-			log.Printf("Network check attempt %d/%d", i+1, maxRetries)
+			log.Printf("Network check attempt to %s (%d/%d)", CheckURL, i+1, maxRetries)
 		}
 
 		resp, err := client.Get(CheckURL)
@@ -53,7 +53,11 @@ func checkNetworkAccess(debug bool) bool {
 		}
 
 		if debug {
-			log.Println("Network check failed")
+			if err != nil {
+				log.Printf("Network check failed: %v", err)
+			} else {
+				log.Printf("Network check failed: HTTP %d", resp.StatusCode)
+			}
 			log.SetFlags(0)
 		}
 
