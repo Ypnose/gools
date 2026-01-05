@@ -3,6 +3,7 @@ package main
 import (
 	"crypto/tls"
 	"flag"
+	"io"
 	"log"
 	"net/http"
 	"net/url"
@@ -68,6 +69,14 @@ func checkNetworkAccess(debug bool) bool {
 	return false
 }
 
+func readFromStdin() (string, error) {
+	data, err := io.ReadAll(os.Stdin)
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
+}
+
 func main() {
 	title := flag.String("title", "", "")
 	message := flag.String("message", "", "")
@@ -80,7 +89,7 @@ func main() {
 		log.Println("  -title string")
 		log.Println("    Title of the message (required)")
 		log.Println("  -message string")
-		log.Println("    Content of the message (required)")
+		log.Println("    Content of the message (required, use - to read from stdin)")
 		log.Println("  -user string")
 		log.Println("    Username for authentication (required if not set in code)")
 		log.Println("  -token string")
@@ -89,6 +98,14 @@ func main() {
 		log.Println("    Enable debug logging")
 	}
 	flag.Parse()
+
+	if *message == "-" {
+		stdinContent, err := readFromStdin()
+		if err != nil {
+			log.Fatal("Failed to read from stdin: ", err)
+		}
+		*message = stdinContent
+	}
 
 	missing := []string{}
 	if *title == "" {
