@@ -23,11 +23,23 @@ import (
 )
 
 var (
-	content     string
 	contentFile string
 	prefix      string
 	mu          sync.Mutex
+	sessions    = make(map[string]*Session)
+	sessionMu   sync.Mutex
+	limiter     = &rateLimiter{attempts: make(map[string][]time.Time)}
 )
+
+type Session struct {
+	key       []byte
+	expiresAt time.Time
+}
+
+type rateLimiter struct {
+	attempts map[string][]time.Time
+	mu       sync.Mutex
+}
 
 const htmlTemplate = `
 <!DOCTYPE html>
@@ -39,14 +51,12 @@ const htmlTemplate = `
 		:root {
 			--background:#fff;
 			--text:#24292e;
-			--link-color:#0366d6;
 			font-size:16px;
 		}
 		@media (prefers-color-scheme:dark) {
 			:root {
 				--background:#21292c;
 				--text:#c9d1d9;
-				--link-color:#58a6ff;
 			}
 			input[type="password"] {
 				background-color:#21292c;
@@ -54,9 +64,7 @@ const htmlTemplate = `
 			}
 		}
 		@media (max-width:600px) {
-			:root {
-				font-size:0.875rem;
-			}
+			:root { font-size:0.875rem; }
 		}
 		body {
 			font-family:-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
@@ -109,27 +117,45 @@ const htmlTemplate = `
 		}
 	</style>
 	<script>
-		const prefix = {{.Prefix}};
+		const prefix = "{{.Prefix}}";
 		let timeout;
-		let currentPassword;
+		let inactivityTimer;
+		const INACTIVITY_TIMEOUT = 10 * 60 * 1000; // 10 minutes
+
+		function resetInactivity() {
+			clearTimeout(inactivityTimer);
+			inactivityTimer = setTimeout(() => {
+				const cookiePath = prefix ? prefix + '/' : '/';
+				document.cookie = 'session=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=' + cookiePath + ';';
+				alert('Session expired due to inactivity');
+				location.reload();
+			}, INACTIVITY_TIMEOUT);
+		}
 
 		async function login() {
-			currentPassword = document.getElementById('password').value;
+			const password = document.getElementById('password').value;
+			const passwordField = document.getElementById('password');
+
 			const response = await fetch(prefix + '/decrypt/', {
 				method: 'POST',
 				headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-				body: 'password=' + encodeURIComponent(currentPassword)
+				body: 'password=' + encodeURIComponent(password)
 			});
+
+			passwordField.value = '';
 
 			if (response.ok) {
 				document.querySelector('#login-container').style.display = 'none';
 				document.querySelector('#editor-container').style.display = 'block';
 				const text = await response.text();
 				document.getElementById('editor').value = text;
+
+				resetInactivity();
+				document.addEventListener('mousemove', resetInactivity);
+				document.addEventListener('keypress', resetInactivity);
 			} else {
 				alert('Invalid password');
-				document.getElementById('password').value = '';
-				document.getElementById('password').focus();
+				passwordField.focus();
 			}
 		}
 
@@ -139,8 +165,7 @@ const htmlTemplate = `
 				fetch(prefix + '/save/', {
 					method: 'POST',
 					headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-					body: 'content=' + encodeURIComponent(document.getElementById('editor').value) +
-						  '&password=' + encodeURIComponent(currentPassword)
+					body: 'content=' + encodeURIComponent(document.getElementById('editor').value)
 				});
 			}, 500);
 		}
@@ -165,18 +190,16 @@ const htmlTemplate = `
 </html>
 `
 
-func init() {
-	if err := os.MkdirAll(filepath.Dir(contentFile), 0700); err != nil {
-		log.Fatal(err)
-	}
-}
+var pageTemplate *template.Template
 
-func sanitizeFilename(filename string) string {
+func normalizeFilename(filename string) string {
+	// Note: This only normalizes path, does NOT prevent directory traversal
+	// Safe here because filename comes from flag.StringVar, not user input
 	return filepath.Clean(strings.TrimSpace(filename))
 }
 
 func validateContent(content string) bool {
-	return len(content) <= 1024*1024 // 1MB limit
+	return len(content) <= 1024*1024
 }
 
 func timeoutMiddleware(next http.HandlerFunc) http.HandlerFunc {
@@ -184,6 +207,15 @@ func timeoutMiddleware(next http.HandlerFunc) http.HandlerFunc {
 		ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 		defer cancel()
 		next(w, r.WithContext(ctx))
+	}
+}
+
+func securityHeaders(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("X-Frame-Options", "DENY")
+		w.Header().Set("Referrer-Policy", "no-referrer")
+		next(w, r)
 	}
 }
 
@@ -196,13 +228,13 @@ func deriveKey(password string, salt []byte) []byte {
 	return argon2.IDKey([]byte(password), salt, 4, 64*1024, 2, 32)
 }
 
-func encrypt(data []byte, password string) ([]byte, error) {
-	salt := make([]byte, 32)
-	if _, err := io.ReadFull(rand.Reader, salt); err != nil {
-		return nil, err
+func zeroBytes(b []byte) {
+	for i := range b {
+		b[i] = 0
 	}
+}
 
-	key := deriveKey(password, salt)
+func encrypt(data []byte, key []byte) ([]byte, error) {
 	block, err := aes.NewCipher(key)
 	if err != nil {
 		return nil, err
@@ -218,19 +250,12 @@ func encrypt(data []byte, password string) ([]byte, error) {
 		return nil, err
 	}
 
+	// GCM.Seal appends auth tag automatically - provides integrity
 	encryptedData := gcm.Seal(nonce, nonce, data, nil)
-	return append(salt, encryptedData...), nil
+	return encryptedData, nil
 }
 
-func decrypt(data []byte, password string) ([]byte, error) {
-	if len(data) < 32 {
-		return nil, fmt.Errorf("Encrypted data too short")
-	}
-
-	salt := data[:32]
-	data = data[32:]
-
-	key := deriveKey(password, salt)
+func decrypt(data []byte, key []byte) ([]byte, error) {
 	block, err := aes.NewCipher(key)
 	if err != nil {
 		return nil, err
@@ -243,18 +268,164 @@ func decrypt(data []byte, password string) ([]byte, error) {
 
 	nonceSize := gcm.NonceSize()
 	if len(data) < nonceSize {
-		return nil, fmt.Errorf("Encrypted data too short")
+		return nil, fmt.Errorf("invalid data")
 	}
 
 	nonce, ciphertext := data[:nonceSize], data[nonceSize:]
-	return gcm.Open(nil, nonce, ciphertext, nil)
+
+	// GCM.Open verifies integrity - fails if tampered
+	decrypted, err := gcm.Open(nil, nonce, ciphertext, nil)
+	if err != nil {
+		return nil, fmt.Errorf("integrity check failed")
+	}
+
+	return decrypted, nil
+}
+
+func decryptWithPassword(data []byte, password string) ([]byte, []byte, error) {
+	if len(data) < 32 {
+		return nil, nil, fmt.Errorf("invalid data")
+	}
+
+	salt := data[:32]
+	encryptedData := data[32:]
+
+	key := deriveKey(password, salt)
+
+	decrypted, err := decrypt(encryptedData, key)
+	if err != nil {
+		zeroBytes(key)
+		return nil, nil, err
+	}
+
+	return decrypted, key, nil
+}
+
+func createSession(key []byte) (string, error) {
+	sessionMu.Lock()
+	defer sessionMu.Unlock()
+
+	// Prevent unbounded session growth
+	if len(sessions) >= 100 {
+		return "", fmt.Errorf("too many sessions")
+	}
+
+	tokenBytes := make([]byte, 32)
+	if _, err := rand.Read(tokenBytes); err != nil {
+		return "", err
+	}
+
+	token := fmt.Sprintf("%x", tokenBytes)
+
+	sessions[token] = &Session{
+		key:       key,
+		expiresAt: time.Now().Add(10 * time.Minute),
+	}
+
+	return token, nil
+}
+
+func validateSession(token string) ([]byte, bool) {
+	sessionMu.Lock()
+	defer sessionMu.Unlock()
+
+	session, exists := sessions[token]
+	if !exists || time.Now().After(session.expiresAt) {
+		if exists {
+			zeroBytes(session.key)
+			delete(sessions, token)
+		}
+		return nil, false
+	}
+
+	// Return a copy of the key to prevent use-after-zero
+	keyCopy := make([]byte, len(session.key))
+	copy(keyCopy, session.key)
+	return keyCopy, true
+}
+
+func extendSession(token string) {
+	sessionMu.Lock()
+	defer sessionMu.Unlock()
+
+	if session, exists := sessions[token]; exists {
+		session.expiresAt = time.Now().Add(10 * time.Minute)
+	}
+}
+
+func cleanupSessions() {
+	ticker := time.NewTicker(5 * time.Minute)
+	for range ticker.C {
+		sessionMu.Lock()
+		now := time.Now()
+		for token, session := range sessions {
+			if now.After(session.expiresAt) {
+				zeroBytes(session.key)
+				delete(sessions, token)
+			}
+		}
+		sessionMu.Unlock()
+	}
+}
+
+func (rl *rateLimiter) allow(ip string) bool {
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+
+	now := time.Now()
+	cutoff := now.Add(-5 * time.Minute)
+
+	// Clean old attempts for this IP
+	var recent []time.Time
+	for _, t := range rl.attempts[ip] {
+		if t.After(cutoff) {
+			recent = append(recent, t)
+		}
+	}
+
+	if len(recent) >= 5 {
+		return false
+	}
+
+	// Record this attempt
+	rl.attempts[ip] = append(recent, now)
+	return true
+}
+
+func (rl *rateLimiter) cleanup() {
+	ticker := time.NewTicker(5 * time.Minute)
+	for range ticker.C {
+		rl.mu.Lock()
+		now := time.Now()
+		cutoff := now.Add(-5 * time.Minute)
+
+		for ip, attempts := range rl.attempts {
+			var recent []time.Time
+			for _, t := range attempts {
+				if t.After(cutoff) {
+					recent = append(recent, t)
+				}
+			}
+
+			if len(recent) == 0 {
+				delete(rl.attempts, ip)
+			} else {
+				rl.attempts[ip] = recent
+			}
+		}
+		rl.mu.Unlock()
+	}
 }
 
 func getRemoteIP(r *http.Request) string {
-	if forwarded := r.Header.Get("X-Forwarded-For"); forwarded != "" {
-		return strings.Split(forwarded, ",")[0]
+	// Only trust X-Forwarded-For if request comes from localhost
+	remoteAddr := strings.Split(r.RemoteAddr, ":")[0]
+	if remoteAddr == "127.0.0.1" || remoteAddr == "::1" {
+		if forwarded := r.Header.Get("X-Forwarded-For"); forwarded != "" {
+			return strings.TrimSpace(strings.Split(forwarded, ",")[0])
+		}
 	}
-	return strings.Split(r.RemoteAddr, ":")[0]
+	return remoteAddr
 }
 
 func main() {
@@ -270,7 +441,20 @@ func main() {
 	flag.StringVar(&prefix, "prefix", "", "URL prefix")
 	flag.Parse()
 
-	contentFile = sanitizeFilename(contentFile)
+	contentFile = normalizeFilename(contentFile)
+
+	var err error
+	pageTemplate, err = template.New("page").Parse(htmlTemplate)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// Create directory for content file if needed
+	if dir := filepath.Dir(contentFile); dir != "." {
+		if err := os.MkdirAll(dir, 0700); err != nil {
+			log.Fatal(err)
+		}
+	}
 
 	srv := &http.Server{
 		Addr:         fmt.Sprintf("%s:%d", *addr, *port),
@@ -280,9 +464,12 @@ func main() {
 	}
 
 	prefix = strings.TrimSuffix(prefix, "/")
-	http.HandleFunc(prefix+"/", timeoutMiddleware(handleHome))
-	http.HandleFunc(prefix+"/save/", timeoutMiddleware(handleSave))
-	http.HandleFunc(prefix+"/decrypt/", timeoutMiddleware(handleDecrypt))
+	http.HandleFunc(prefix+"/", securityHeaders(timeoutMiddleware(handleHome)))
+	http.HandleFunc(prefix+"/save/", securityHeaders(timeoutMiddleware(handleSave)))
+	http.HandleFunc(prefix+"/decrypt/", securityHeaders(timeoutMiddleware(handleDecrypt)))
+
+	go cleanupSessions()
+	go limiter.cleanup()
 
 	go func() {
 		sigChan := make(chan os.Signal, 1)
@@ -317,8 +504,7 @@ func handleHome(w http.ResponseWriter, r *http.Request) {
 		Prefix:   prefix,
 	}
 
-	tmpl := template.Must(template.New("page").Parse(htmlTemplate))
-	tmpl.Execute(w, data)
+	pageTemplate.Execute(w, data)
 }
 
 func handleSave(w http.ResponseWriter, r *http.Request) {
@@ -327,29 +513,89 @@ func handleSave(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	r.ParseForm()
+	// Validate Origin header for CSRF protection
+	if origin := r.Header.Get("Origin"); origin != "" {
+		// Parse origin to compare hostnames (handles port differences)
+		originHost := strings.TrimPrefix(strings.TrimPrefix(origin, "https://"), "http://")
+		originHost = strings.Split(originHost, ":")[0] // Remove port if present
+		requestHost := strings.Split(r.Host, ":")[0]   // Remove port if present
+
+		if originHost != requestHost {
+			http.Error(w, "Invalid origin", http.StatusForbidden)
+			return
+		}
+	}
+
+	cookie, err := r.Cookie("session")
+	if err != nil {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	key, valid := validateSession(cookie.Value)
+	if !valid {
+		http.Error(w, "Session expired", http.StatusUnauthorized)
+		return
+	}
+	defer zeroBytes(key) // Zero key copy when done
+
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "Bad request", http.StatusBadRequest)
+		return
+	}
 	content := r.Form.Get("content")
-	password := r.Form.Get("password")
 
 	if !validateContent(content) {
 		http.Error(w, "Content too large", http.StatusBadRequest)
 		return
 	}
 
-	encrypted, err := encrypt([]byte(content), password)
+	encrypted, err := encrypt([]byte(content), key)
 	if err != nil {
 		http.Error(w, "Encryption failed", http.StatusInternalServerError)
 		return
 	}
 
+	// Read existing file to get salt
 	mu.Lock()
-	err = os.WriteFile(contentFile, encrypted, 0600)
+	existing, err := os.ReadFile(contentFile)
+	mu.Unlock()
+
+	if err != nil {
+		http.Error(w, "Failed to read file", http.StatusInternalServerError)
+		return
+	}
+
+	if len(existing) < 32 {
+		http.Error(w, "Invalid file format", http.StatusInternalServerError)
+		return
+	}
+
+	// Preserve salt, replace encrypted data
+	salt := existing[:32]
+	result := make([]byte, 0, 32+len(encrypted))
+	result = append(result, salt...)
+	result = append(result, encrypted...)
+
+	// Atomic write: write to temp file, then rename
+	tmpFile := contentFile + ".tmp"
+	mu.Lock()
+	err = os.WriteFile(tmpFile, result, 0600)
+	if err == nil {
+		err = os.Rename(tmpFile, contentFile)
+	}
+	if err != nil {
+		os.Remove(tmpFile) // Clean up on failure
+	}
 	mu.Unlock()
 
 	if err != nil {
 		http.Error(w, "Failed to save content", http.StatusInternalServerError)
 		return
 	}
+
+	// Extend session only after successful save
+	extendSession(cookie.Value)
 }
 
 func handleDecrypt(w http.ResponseWriter, r *http.Request) {
@@ -358,13 +604,37 @@ func handleDecrypt(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	r.ParseForm()
+	// Validate Origin header for CSRF protection
+	if origin := r.Header.Get("Origin"); origin != "" {
+		// Parse origin to compare hostnames (handles port differences)
+		originHost := strings.TrimPrefix(strings.TrimPrefix(origin, "https://"), "http://")
+		originHost = strings.Split(originHost, ":")[0]
+		requestHost := strings.Split(r.Host, ":")[0]
+
+		if originHost != requestHost {
+			http.Error(w, "Invalid origin", http.StatusForbidden)
+			return
+		}
+	}
+
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "Bad request", http.StatusBadRequest)
+		return
+	}
+
 	password := r.Form.Get("password")
 	if password == "" {
 		http.Error(w, "Password required", http.StatusBadRequest)
 		return
 	}
 	remoteIP := getRemoteIP(r)
+
+	// Check rate limit
+	if !limiter.allow(remoteIP) {
+		log.Printf("Rate limit exceeded from %s", remoteIP)
+		http.Error(w, "Too many attempts. Please try again later.", http.StatusTooManyRequests)
+		return
+	}
 
 	mu.Lock()
 	encrypted, err := os.ReadFile(contentFile)
@@ -376,30 +646,92 @@ func handleDecrypt(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	cookiePath := "/"
+	if prefix != "" {
+		cookiePath = prefix + "/"
+	}
+
 	if len(encrypted) > 0 {
-		decrypted, err := decrypt(encrypted, password)
+		decrypted, key, err := decryptWithPassword(encrypted, password)
 		if err != nil {
-			log.Printf("Failed login attempt from %s", remoteIP)
+			if strings.Contains(err.Error(), "integrity check failed") {
+				log.Printf("Integrity check failed from %s - possible file tampering", remoteIP)
+			} else {
+				log.Printf("Failed login attempt from %s", remoteIP)
+			}
 			http.Error(w, "Invalid password", http.StatusUnauthorized)
 			return
 		}
+
+		// Create session with derived key
+		sessionToken, err := createSession(key)
+		if err != nil {
+			zeroBytes(key)
+			http.Error(w, "Failed to create session", http.StatusInternalServerError)
+			return
+		}
+
+		http.SetCookie(w, &http.Cookie{
+			Name:     "session",
+			Value:    sessionToken,
+			Path:     cookiePath,
+			MaxAge:   600, // 10 minutes
+			HttpOnly: true,
+			Secure:   true,
+			SameSite: http.SameSiteStrictMode,
+		})
+
 		log.Printf("Successful login from %s", remoteIP)
 		fmt.Fprint(w, string(decrypted))
 	} else {
-		encrypted, err := encrypt([]byte(""), password)
+		// New file - derive key from password
+		salt := make([]byte, 32)
+		if _, err := io.ReadFull(rand.Reader, salt); err != nil {
+			http.Error(w, "Failed to generate salt", http.StatusInternalServerError)
+			return
+		}
+
+		key := deriveKey(password, salt)
+
+		encrypted, err := encrypt([]byte(""), key)
 		if err != nil {
+			zeroBytes(key)
 			http.Error(w, "Encryption failed", http.StatusInternalServerError)
 			return
 		}
 
+		// Prepend salt
+		result := make([]byte, 0, 32+len(encrypted))
+		result = append(result, salt...)
+		result = append(result, encrypted...)
+
 		mu.Lock()
-		err = os.WriteFile(contentFile, encrypted, 0600)
+		err = os.WriteFile(contentFile, result, 0600)
 		mu.Unlock()
 
 		if err != nil {
+			zeroBytes(key)
 			http.Error(w, "Failed to create file", http.StatusInternalServerError)
 			return
 		}
+
+		// Create session with derived key
+		sessionToken, err := createSession(key)
+		if err != nil {
+			zeroBytes(key)
+			http.Error(w, "Failed to create session", http.StatusInternalServerError)
+			return
+		}
+
+		http.SetCookie(w, &http.Cookie{
+			Name:     "session",
+			Value:    sessionToken,
+			Path:     cookiePath,
+			MaxAge:   600, // 10 minutes
+			HttpOnly: true,
+			Secure:   true,
+			SameSite: http.SameSiteStrictMode,
+		})
 
 		log.Printf("New file created from %s", remoteIP)
 		fmt.Fprint(w, "")
