@@ -49,8 +49,12 @@ func findThermalSensors() ([]ThermalSensor, []string, error) {
 	var warnings []string
 
 	// Check if thermal path exists
-	if _, err := os.Stat(thermalPath); os.IsNotExist(err) {
-		return nil, nil, fmt.Errorf("Thermal subsystem path %s does not exist", thermalPath)
+	info, err := os.Stat(thermalPath)
+	if err != nil {
+		return nil, nil, fmt.Errorf("Cannot stat %s: %v", thermalPath, err)
+	}
+	if !info.IsDir() {
+		return nil, nil, fmt.Errorf("%s exists but is not a directory", thermalPath)
 	}
 
 	// Find all thermal zone directories
