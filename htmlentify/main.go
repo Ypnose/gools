@@ -4,9 +4,10 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"unicode/utf8"
 )
 
-const maxInputLength = 1048576 // 1MB
+const maxInputRunes = 131072 // ~1MB output (8 bytes/rune worst case)
 
 func main() {
 	if len(os.Args) < 2 {
@@ -16,15 +17,16 @@ func main() {
 	}
 
 	input := strings.Join(os.Args[1:], " ")
+	runeCount := utf8.RuneCountInString(input)
 
-	if len(input) > maxInputLength {
+	if runeCount > maxInputRunes {
 		fmt.Fprintln(os.Stderr, "Error: input exceeds maximum length")
 		os.Exit(1)
 	}
 
 	var hex, dec strings.Builder
-	hex.Grow(len(input) * 8)
-	dec.Grow(len(input) * 7)
+	hex.Grow(runeCount * 8)
+	dec.Grow(runeCount * 7)
 
 	for _, r := range input {
 		fmt.Fprintf(&hex, "&#x%X;", r)
