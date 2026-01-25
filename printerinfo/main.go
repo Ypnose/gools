@@ -7,7 +7,6 @@ import (
 	"net"
 	"os"
 	"strings"
-	"sync"
 	"time"
 	"encoding/hex"
 	"sort"
@@ -17,8 +16,7 @@ import (
 )
 
 const (
-	timeout       = 5 * time.Second
-	maxConcurrent = 10
+	timeout = 5 * time.Second
 )
 
 type Supply struct {
@@ -96,46 +94,52 @@ func main() {
 
 func getBasicInfo(snmp *gosnmp.GoSNMP) (string, error) {
 	result, err := snmp.Get([]string{
-		"1.3.6.1.2.1.1.5.0",         // Name
+		"1.3.6.1.2.1.1.5.0",        // Name
 		"1.3.6.1.2.1.25.3.2.1.3.1", // Model
-		"1.3.6.1.2.1.1.6.0",     // Location
+		"1.3.6.1.2.1.2.2.1.6.1",    // MAC Address
+		"1.3.6.1.2.1.1.6.0",        // Location
 	})
 	if err != nil {
 		return "", fmt.Errorf("SNMP Get error: %v", err)
 	}
 
-	return fmt.Sprintf("Name: %s\nModel: %s\nLocation: %s\n",
+	if len(result.Variables) < 4 {
+		return "", fmt.Errorf("expected 4 SNMP variables, got %d", len(result.Variables))
+	}
+
+	return fmt.Sprintf("Name: %s\nModel: %s\nMAC Address: %s\nLocation: %s\n",
 		decodeValue(result.Variables[0].Value),
 		decodeValue(result.Variables[1].Value),
-		decodeValue(result.Variables[2].Value)), nil
+		formatMAC(result.Variables[2].Value),
+		decodeValue(result.Variables[3].Value)), nil
 }
 
 func getSupplies(snmp *gosnmp.GoSNMP) ([]Supply, error) {
 	var supplies []Supply
-	var mu sync.Mutex
-
 	err := snmp.Walk("1.3.6.1.2.1.43.11.1.1.6.1", func(pdu gosnmp.SnmpPDU) error {
 		oidParts := strings.Split(pdu.Name, ".")
-		if len(oidParts) == 0 {
+		if len(oidParts) < 2 {
 			return nil
 		}
 
 		index := oidParts[len(oidParts)-1]
+		if index == "" {
+			return nil
+		}
 		name := decodeValue(pdu.Value)
 
 		levelOid := "1.3.6.1.2.1.43.11.1.1.9.1." + index
 		result, err := snmp.Get([]string{levelOid})
 		if err != nil {
+			log.Printf("Warning: Failed to get level for supply %s (index %s): %v", name, index, err)
 			return nil
 		}
 
 		if len(result.Variables) > 0 && result.Variables[0].Value != nil {
-			mu.Lock()
 			supplies = append(supplies, Supply{
 				Name:  name,
 				Level: result.Variables[0].Value,
 			})
-			mu.Unlock()
 		}
 		return nil
 	})
@@ -153,6 +157,25 @@ func getSnmpVersion(version string) gosnmp.SnmpVersion {
 		log.Fatalf("Unsupported SNMP version: %s", version)
 		return gosnmp.Version2c
 	}
+}
+
+func formatMAC(value interface{}) string {
+	if value == nil {
+		return "N/A"
+	}
+
+	if mac, ok := value.([]byte); ok && len(mac) == 6 {
+		return fmt.Sprintf("%02x:%02x:%02x:%02x:%02x:%02x",
+			mac[0], mac[1], mac[2], mac[3], mac[4], mac[5])
+	}
+
+	if str, ok := value.(string); ok {
+		if strings.Contains(str, ":") || strings.Contains(str, "-") {
+			return str
+		}
+	}
+
+	return decodeValue(value)
 }
 
 func decodeValue(value interface{}) string {
