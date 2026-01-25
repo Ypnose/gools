@@ -3,6 +3,7 @@ package main
 import (
 	"archive/zip"
 	"compress/gzip"
+	"context"
 	"encoding/xml"
 	"flag"
 	"fmt"
@@ -65,8 +66,8 @@ type Identifiers struct {
 }
 
 type AuthResults struct {
-	DKIM DKIMResult `xml:"dkim"`
-	SPF  SPFResult  `xml:"spf"`
+	DKIM []DKIMResult `xml:"dkim"`
+	SPF  []SPFResult  `xml:"spf"`
 }
 
 type DKIMResult struct {
@@ -85,6 +86,20 @@ func formatTimestamp(timestamp int64) string {
 	return t.Format("2006-01-02 15:04:05")
 }
 
+func truncateString(s string, maxLen int) string {
+	if maxLen < 1 {
+		return ""
+	}
+	runes := []rune(s)
+	if len(runes) <= maxLen {
+		return s
+	}
+	if maxLen < 4 {
+		return string(runes[:maxLen])
+	}
+	return string(runes[:maxLen-3]) + "..."
+}
+
 // Resolve IP to hostname, return IP if resolution fails
 func resolveIP(ip string) string {
 	if ip == "" {
@@ -97,7 +112,12 @@ func resolveIP(ip string) string {
 		return ip
 	}
 
-	names, err := net.LookupAddr(ip)
+	// Use context with timeout to prevent hanging on slow DNS
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	resolver := &net.Resolver{}
+	names, err := resolver.LookupAddr(ctx, ip)
 	if err != nil || len(names) == 0 {
 		return ip
 	}
@@ -141,10 +161,7 @@ func main() {
 		}
 		defer gzReader.Close()
 		reader = gzReader
-	}
-
-	// Check if file is zipped
-	if strings.HasSuffix(strings.ToLower(filename), ".zip") {
+	} else if strings.HasSuffix(strings.ToLower(filename), ".zip") {
 		fileInfo, err := file.Stat()
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error getting file info: %v\n", err)
@@ -229,7 +246,7 @@ func main() {
 		spfResultWidth, "SPF Result")
 
 	totalWidth := sourceIPWidth + countWidth + dispositionWidth + dkimWidth +
-		spfWidth + fromWidth + toWidth + dkimResultWidth + spfResultWidth + 8 // Add 8 for spaces (one more column)
+		spfWidth + fromWidth + toWidth + dkimResultWidth + spfResultWidth + 8 // 8 spaces between 9 columns
 	fmt.Println(strings.Repeat("-", totalWidth))
 
 	for _, record := range report.Records {
@@ -237,19 +254,21 @@ func main() {
 		sourceHost := resolveIP(record.Row.SourceIP)
 
 		// Truncate hostname if too long, preserving the width constraint
-		if len(sourceHost) > sourceIPWidth {
-			sourceHost = sourceHost[:sourceIPWidth-3] + "..."
-		}
+		sourceHost = truncateString(sourceHost, sourceIPWidth)
 
 		// Ensure values are not too long for their columns
-		headerFrom := record.Identifiers.HeaderFrom
-		if len(headerFrom) > fromWidth {
-			headerFrom = headerFrom[:fromWidth-3] + "..."
+		headerFrom := truncateString(record.Identifiers.HeaderFrom, fromWidth)
+		envelopeTo := truncateString(record.Identifiers.EnvelopeTo, toWidth)
+
+		// Handle potentially missing or multiple auth results fields
+		dkimResult := ""
+		if len(record.AuthResults.DKIM) > 0 {
+			dkimResult = record.AuthResults.DKIM[0].Result
 		}
 
-		envelopeTo := record.Identifiers.EnvelopeTo
-		if len(envelopeTo) > toWidth {
-			envelopeTo = envelopeTo[:toWidth-3] + "..."
+		spfResult := ""
+		if len(record.AuthResults.SPF) > 0 {
+			spfResult = record.AuthResults.SPF[0].Result
 		}
 
 		fmt.Printf("%-*s %-*d %-*s %-*s %-*s %-*s %-*s %-*s %-*s\n",
@@ -260,7 +279,7 @@ func main() {
 			spfWidth, record.Row.SPF,
 			fromWidth, headerFrom,
 			toWidth, envelopeTo,
-			dkimResultWidth, record.AuthResults.DKIM.Result,
-			spfResultWidth, record.AuthResults.SPF.Result)
+			dkimResultWidth, dkimResult,
+			spfResultWidth, spfResult)
 	}
 }
