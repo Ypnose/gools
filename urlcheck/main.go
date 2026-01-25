@@ -1,8 +1,10 @@
 package main
 
 import (
+	"context"
 	"crypto/tls"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/url"
@@ -19,7 +21,6 @@ func main() {
 	}
 
 	arg := os.Args[1]
-
 	if strings.HasPrefix(arg, "-") {
 		printUsage()
 		os.Exit(0)
@@ -52,12 +53,19 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Warning: Using insecure HTTP protocol\n")
 	}
 
-	client := &http.Client{
-		Timeout: 10 * time.Second,
-		Transport: &http.Transport{
-			Dial: (&net.Dialer{
+	// Normalize target URL before request
+	targetURL, err = normalizeURL(targetURL)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Invalid URL format\n")
+		os.Exit(1)
+	}
+
+	var transport http.RoundTripper
+	if parsedURL.Scheme == "https" {
+		transport = &http.Transport{
+			DialContext: (&net.Dialer{
 				Timeout: 5 * time.Second,
-			}).Dial,
+			}).DialContext,
 			TLSClientConfig: &tls.Config{
 				MinVersion:         tls.VersionTLS12,
 				MaxVersion:         tls.VersionTLS13,
@@ -72,13 +80,30 @@ func main() {
 					tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
 				},
 			},
-			DisableKeepAlives:        true,
-			DisableCompression:       false,
-			MaxIdleConns:             0,
-			IdleConnTimeout:          0,
-			ResponseHeaderTimeout:    5 * time.Second,
-			MaxResponseHeaderBytes:   32768, // 32KB limit
-		},
+			DisableKeepAlives:      true,
+			DisableCompression:     false,
+			MaxIdleConns:           0,
+			IdleConnTimeout:        0,
+			ResponseHeaderTimeout:  5 * time.Second,
+			MaxResponseHeaderBytes: 32768, // 32KB limit
+		}
+	} else {
+		transport = &http.Transport{
+			DialContext: (&net.Dialer{
+				Timeout: 5 * time.Second,
+			}).DialContext,
+			DisableKeepAlives:      true,
+			DisableCompression:     false,
+			MaxIdleConns:           0,
+			IdleConnTimeout:        0,
+			ResponseHeaderTimeout:  5 * time.Second,
+			MaxResponseHeaderBytes: 32768, // 32KB limit
+		}
+	}
+
+	client := &http.Client{
+		Timeout:   10 * time.Second,
+		Transport: transport,
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			if len(via) >= 10 {
 				return fmt.Errorf("too many redirects")
@@ -88,7 +113,10 @@ func main() {
 	}
 
 	// Make HEAD request first for efficiency and security
-	req, err := http.NewRequest("HEAD", targetURL, nil)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, "HEAD", targetURL, nil)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%v\n", err)
 		os.Exit(1)
@@ -99,14 +127,19 @@ func main() {
 
 	resp, err := client.Do(req)
 	if err != nil {
-		if strings.Contains(err.Error(), "timeout") {
+		// Check for timeout errors
+		if ne, ok := err.(net.Error); ok && ne.Timeout() {
 			fmt.Fprintf(os.Stderr, "Request timeout\n")
-		} else if strings.Contains(err.Error(), "connection refused") {
-			fmt.Fprintf(os.Stderr, "Connection refused\n")
-		} else if strings.Contains(err.Error(), "no such host") {
-			fmt.Fprintf(os.Stderr, "DNS resolution failed\n")
-		} else if strings.Contains(err.Error(), "too many redirects") {
-			fmt.Fprintf(os.Stderr, "Too many redirects (max 10)\n")
+		} else if urlErr, ok := err.(*url.Error); ok {
+			if strings.Contains(urlErr.Err.Error(), "connection refused") {
+				fmt.Fprintf(os.Stderr, "Connection refused\n")
+			} else if strings.Contains(urlErr.Err.Error(), "no such host") {
+				fmt.Fprintf(os.Stderr, "DNS resolution failed\n")
+			} else if strings.Contains(urlErr.Err.Error(), "too many redirects") {
+				fmt.Fprintf(os.Stderr, "Too many redirects (max 10)\n")
+			} else {
+				fmt.Fprintf(os.Stderr, "%v\n", err)
+			}
 		} else {
 			fmt.Fprintf(os.Stderr, "%v\n", err)
 		}
@@ -114,14 +147,39 @@ func main() {
 	}
 	defer resp.Body.Close()
 
+	// Drain response body to avoid connection issues
+	io.Copy(io.Discard, resp.Body)
+
 	finalURL := resp.Request.URL.String()
-	if finalURL != targetURL {
+	// Normalize URLs for comparison
+	normalizedTarget, _ := normalizeURL(targetURL)
+	normalizedFinal, _ := normalizeURL(finalURL)
+
+	if normalizedFinal != normalizedTarget {
 		fmt.Printf("%d %s > %s\n", resp.StatusCode, targetURL, finalURL)
 	} else {
 		fmt.Printf("%d %s\n", resp.StatusCode, finalURL)
 	}
 
 	os.Exit(0)
+}
+
+func normalizeURL(rawURL string) (string, error) {
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return rawURL, err
+	}
+
+	// Remove default ports
+	host := parsed.Host
+	if parsed.Scheme == "http" && strings.HasSuffix(host, ":80") {
+		host = strings.TrimSuffix(host, ":80")
+	} else if parsed.Scheme == "https" && strings.HasSuffix(host, ":443") {
+		host = strings.TrimSuffix(host, ":443")
+	}
+
+	parsed.Host = host
+	return parsed.String(), nil
 }
 
 func printUsage() {
