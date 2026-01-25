@@ -495,7 +495,7 @@ func initTemplate() error {
 		:root {
 			--background:#fff;
 			--text:#24292e;
-			--border:#d1d5da;
+			--border:#ced4da;
 			--entry-bg:#f6f8fa;
 			--button-bg:#0366d6;
 			--button-hover:#0256c4;
@@ -505,9 +505,9 @@ func initTemplate() error {
 		}
 		@media (prefers-color-scheme:dark) {
 			:root {
-				--background:#0d1117;
+				--background:#21292c;
 				--text:#c9d1d9;
-				--border:#30363d;
+				--border:#48515c;
 				--entry-bg:#161b22;
 				--button-bg:#238636;
 				--button-hover:#2ea043;
@@ -515,7 +515,7 @@ func initTemplate() error {
 				--code-text:#7ee787;
 			}
 			input[type="password"] {
-				background-color:#0d1117;
+				background-color:var(--background);
 				color:#c9d1d9;
 			}
 		}
@@ -540,9 +540,7 @@ func initTemplate() error {
 			font-size:1rem;
 			padding:0.5rem;
 			margin:0.625rem;
-			border:1px solid var(--border);
-			border-radius:6px;
-			width:250px;
+			border:1px solid #ced4da;
 		}
 		button {
 			font-size:1rem;
@@ -567,7 +565,6 @@ func initTemplate() error {
 		.entry {
 			background:var(--entry-bg);
 			border:1px solid var(--border);
-			border-radius:8px;
 			padding:1rem;
 			margin-bottom:0.75rem;
 			display:flex;
@@ -577,7 +574,7 @@ func initTemplate() error {
 			flex-wrap:wrap;
 		}
 		.entry-label {
-			font-weight:500;
+			font-weight:700;
 			font-size:1rem;
 			word-break:break-word;
 			flex:1;
@@ -606,7 +603,7 @@ func initTemplate() error {
 			font-weight:600;
 			background:var(--code-bg);
 			color:var(--code-text);
-			padding:0.4rem 0.8rem;
+			padding:0.2rem 0.8rem;
 			border-radius:6px;
 			letter-spacing:0.1em;
 		}
@@ -626,7 +623,7 @@ func initTemplate() error {
 			font-size:0.875rem;
 			white-space:nowrap;
 		}
-		@media (max-width:600px) {
+		@media (max-width:480px) {
 			#entries { padding:0.5rem; }
 			.entry {
 				flex-direction:column;
@@ -651,15 +648,15 @@ func initTemplate() error {
 	</div>
 	<script>
 		const prefix = {{.Prefix}};
-		let entries = [], activeTimers = {}, currentlyShownIndex = null, inactivityTimer;
+		let entries = [], activeTimers = {}, autoHideTimers = {}, currentlyShownIndex = null, inactivityTimer;
 		const INACTIVITY_TIMEOUT = 120000;
 		function resetInactivity() { clearTimeout(inactivityTimer); inactivityTimer = setTimeout(() => { document.cookie = 'session=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=' + (prefix ? prefix + '/' : '/') + ';'; alert('Session expired'); location.reload(); }, INACTIVITY_TIMEOUT); }
 		async function login() { const p = document.getElementById('password'), pw = p.value; p.value = ''; const r = await fetch(prefix + '/decrypt/', { method: 'POST', headers: {'Content-Type': 'application/x-www-form-urlencoded'}, body: 'password=' + encodeURIComponent(pw) }); if (r.ok) { entries = await r.json(); document.getElementById('login-container').style.display = 'none'; document.getElementById('vault-container').style.display = 'flex'; renderEntries(); resetInactivity(); ['mousemove','keypress','click'].forEach(e => document.addEventListener(e, resetInactivity)); } else { alert('Invalid password'); p.focus(); } }
 		function renderEntries() { const c = document.getElementById('entries'); c.innerHTML = ''; entries.forEach((e, i) => { const d = document.createElement('div'); d.className = 'entry'; d.innerHTML = '<div class="entry-label">' + escapeHtml(e.label) + '</div><div class="entry-actions"><button class="show-code-btn" onclick="toggleCode(' + i + ')">Show code</button><div class="code-display" id="code-' + i + '"><div class="code-value" id="code-value-' + i + '">------</div><svg class="progress-ring"><circle class="progress-ring-circle" cx="14" cy="14" r="11" stroke-dasharray="69.115" stroke-dashoffset="0" id="progress-' + i + '"/></svg><button class="copy-btn" onclick="copyCode(' + i + ')">Copy</button></div></div>'; c.appendChild(d); }); }
 		function escapeHtml(t) { const d = document.createElement('div'); d.textContent = t; return d.innerHTML; }
 		async function toggleCode(i) { if (currentlyShownIndex !== null && currentlyShownIndex !== i) hideCode(currentlyShownIndex); const c = document.getElementById('code-' + i), b = document.querySelector('#entries > div:nth-child(' + (i + 1) + ') .show-code-btn'); if (c.style.display === 'flex') { hideCode(i); } else { showCode(i); b.textContent = 'Hide code'; currentlyShownIndex = i; } }
-		async function showCode(i) { document.getElementById('code-' + i).style.display = 'flex'; await updateCode(i); activeTimers[i] = setInterval(() => updateCode(i), 1000); }
-		function hideCode(i) { document.getElementById('code-' + i).style.display = 'none'; document.querySelector('#entries > div:nth-child(' + (i + 1) + ') .show-code-btn').textContent = 'Show code'; if (activeTimers[i]) { clearInterval(activeTimers[i]); delete activeTimers[i]; } if (currentlyShownIndex === i) currentlyShownIndex = null; }
+		async function showCode(i) { document.getElementById('code-' + i).style.display = 'flex'; await updateCode(i); activeTimers[i] = setInterval(() => updateCode(i), 1000); autoHideTimers[i] = setTimeout(() => hideCode(i), 30000); }
+		function hideCode(i) { document.getElementById('code-' + i).style.display = 'none'; document.querySelector('#entries > div:nth-child(' + (i + 1) + ') .show-code-btn').textContent = 'Show code'; if (activeTimers[i]) { clearInterval(activeTimers[i]); delete activeTimers[i]; } if (autoHideTimers[i]) { clearTimeout(autoHideTimers[i]); delete autoHideTimers[i]; } if (currentlyShownIndex === i) currentlyShownIndex = null; }
 		async function updateCode(i) { const r = await fetch(prefix + '/generate/', { method: 'POST', headers: {'Content-Type': 'application/x-www-form-urlencoded'}, body: 'label=' + encodeURIComponent(entries[i].label) }); if (r.ok) { const d = await r.json(); document.getElementById('code-value-' + i).textContent = d.code; const p = document.getElementById('progress-' + i); p.style.strokeDashoffset = 69.115 * (1 - d.remaining / 30); } }
 		async function copyCode(i) { await navigator.clipboard.writeText(document.getElementById('code-value-' + i).textContent); const b = document.querySelector('#entries > div:nth-child(' + (i + 1) + ') .copy-btn'), t = b.textContent; b.textContent = 'Copied!'; setTimeout(() => b.textContent = t, 2000); }
 		window.onload = () => document.getElementById('password').focus();
@@ -744,7 +741,7 @@ func main() {
 	info, err := os.Stat(contentFile)
 	if err == nil {
 		perm := info.Mode().Perm()
-		if perm != 0400 && perm != 0600 {
+		if perm != 0400 && perm != 0440 && perm != 0444 {
 			if err := os.Chmod(contentFile, 0400); err != nil {
 				log.Printf("Warning: Could not set permissions to 0400: %v", err)
 			}
