@@ -1,10 +1,10 @@
 package main
 
 import (
+	"crypto/rand"
 	"flag"
 	"fmt"
 	"io"
-	"math/rand"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -20,10 +20,7 @@ func usage() {
 
 func cleanup(tmpfile string) {
 	if tmpfile != "" {
-		err := os.Remove(tmpfile)
-		if err != nil {
-			os.Exit(1)
-		}
+		os.Remove(tmpfile)
 	}
 }
 
@@ -44,11 +41,15 @@ func setupSecureTempFile() (*os.File, string, error) {
 		return nil, "", fmt.Errorf("Failed to create temp directory: %v", err)
 	}
 
-	// Generate random string for filename (16 characters)
+	// Generate cryptographically random string for filename (16 characters)
 	const letters = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		return nil, "", fmt.Errorf("Failed to generate random filename: %v", err)
+	}
+
 	for i := range b {
-		b[i] = letters[rand.Intn(len(letters))]
+		b[i] = letters[int(b[i])%len(letters)]
 	}
 
 	tmpname := filepath.Join(tmpdir, fmt.Sprintf("sponge-%s.tmp", string(b)))
@@ -61,7 +62,7 @@ func setupSecureTempFile() (*os.File, string, error) {
 	return tmpfile, tmpname, nil
 }
 
-func handleSignals(tmpfile string, done chan<- struct{}) {
+func handleSignals(tmpfile string) {
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan,
 		syscall.SIGINT,
@@ -72,7 +73,6 @@ func handleSignals(tmpfile string, done chan<- struct{}) {
 		<-sigChan
 		signal.Reset()
 		cleanup(tmpfile)
-		close(done)
 		os.Exit(1)
 	}()
 }
@@ -105,7 +105,9 @@ func main() {
 			usage()
 			os.Exit(0)
 		}
-		fmt.Fprintf(os.Stderr, "Flag provided but not defined: %s\n", os.Args[1])
+		if len(os.Args) > 1 {
+			fmt.Fprintf(os.Stderr, "Flag provided but not defined: %s\n", os.Args[1])
+		}
 		usage()
 		os.Exit(1)
 	}
@@ -132,25 +134,31 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
-	defer cleanup(tmpname)
 
-	done := make(chan struct{})
-	handleSignals(tmpname, done)
+	handleSignals(tmpname)
 
 	if err := copyWithBuffer(tmpfile, os.Stdin); err != nil {
+		tmpfile.Close()
+		cleanup(tmpname)
 		fmt.Fprintf(os.Stderr, "Error reading from stdin: %v\n", err)
 		os.Exit(1)
 	}
 
 	if outfile == "" {
 		if _, err := tmpfile.Seek(0, io.SeekStart); err != nil {
+			tmpfile.Close()
+			cleanup(tmpname)
 			fmt.Fprintf(os.Stderr, "Error seeking temp file: %v\n", err)
 			os.Exit(1)
 		}
 		if err := copyWithBuffer(os.Stdout, tmpfile); err != nil {
+			tmpfile.Close()
+			cleanup(tmpname)
 			fmt.Fprintf(os.Stderr, "Error writing to stdout: %v\n", err)
 			os.Exit(1)
 		}
+		tmpfile.Close()
+		cleanup(tmpname)
 		return
 	}
 
@@ -160,43 +168,49 @@ func main() {
 	}
 
 	if err := tmpfile.Sync(); err != nil {
+		tmpfile.Close()
+		cleanup(tmpname)
 		fmt.Fprintf(os.Stderr, "Error syncing temporary file: %v\n", err)
 		os.Exit(1)
 	}
 
 	if err := tmpfile.Close(); err != nil {
+		cleanup(tmpname)
 		fmt.Fprintf(os.Stderr, "Error closing temporary file: %v\n", err)
 		os.Exit(1)
 	}
 
-	if err := os.Rename(tmpname, outfile); err != nil {
-		src, err := os.Open(tmpname)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error opening temp file: %v\n", err)
-			os.Exit(1)
-		}
-		defer src.Close()
-
-		dst, err := os.OpenFile(outfile, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error opening output file: %v\n", err)
-			os.Exit(1)
-		}
-		defer dst.Close()
-
-		if err := copyWithBuffer(dst, src); err != nil {
-			fmt.Fprintf(os.Stderr, "Error copying to output file: %v\n", err)
-			os.Exit(1)
-		}
-
-		if err := dst.Chmod(mode); err != nil {
-			fmt.Fprintf(os.Stderr, "Error setting output file permissions: %v\n", err)
-			os.Exit(1)
-		}
-
-		if err := dst.Sync(); err != nil {
-			fmt.Fprintf(os.Stderr, "Error syncing output file: %v\n", err)
-			os.Exit(1)
-		}
+	if err := os.Rename(tmpname, outfile); err == nil {
+		return
 	}
+
+	src, openErr := os.Open(tmpname)
+	if openErr != nil {
+		cleanup(tmpname)
+		fmt.Fprintf(os.Stderr, "Error opening temp file: %v\n", openErr)
+		os.Exit(1)
+	}
+	defer src.Close()
+
+	dst, openErr := os.OpenFile(outfile, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, mode)
+	if openErr != nil {
+		cleanup(tmpname)
+		fmt.Fprintf(os.Stderr, "Error opening output file: %v\n", openErr)
+		os.Exit(1)
+	}
+	defer dst.Close()
+
+	if err := copyWithBuffer(dst, src); err != nil {
+		cleanup(tmpname)
+		fmt.Fprintf(os.Stderr, "Error copying to output file: %v\n", err)
+		os.Exit(1)
+	}
+
+	if err := dst.Sync(); err != nil {
+		cleanup(tmpname)
+		fmt.Fprintf(os.Stderr, "Error syncing output file: %v\n", err)
+		os.Exit(1)
+	}
+
+	cleanup(tmpname)
 }
