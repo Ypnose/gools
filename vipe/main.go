@@ -60,13 +60,15 @@ func main() {
 	tmpPath := tmpfile.Name()
 
 	cleanup := func() {
-		secureDelete(tmpPath)
-		os.Exit(1)
+		if tmpPath != "" {
+			secureDelete(tmpPath)
+		}
 	}
 
 	go func() {
 		<-sigChan
 		cleanup()
+		os.Exit(1)
 	}()
 
 	defer cleanup()
@@ -136,10 +138,10 @@ func main() {
 }
 
 func getEditor() string {
-	if v := os.Getenv("VISUAL"); v != "" && v != " " {
+	if v := os.Getenv("VISUAL"); v != "" && strings.TrimSpace(v) != "" {
 		return strings.TrimSpace(v)
 	}
-	if e := os.Getenv("EDITOR"); e != "" && e != " " {
+	if e := os.Getenv("EDITOR"); e != "" && strings.TrimSpace(e) != "" {
 		return strings.TrimSpace(e)
 	}
 	if _, err := os.Stat("/usr/bin/editor"); err == nil {
@@ -170,7 +172,15 @@ func secureDelete(path string) {
 				if remaining < writeSize {
 					writeSize = remaining
 				}
-				if _, err := f.Write(zeros[:writeSize]); err != nil {
+				written := 0
+				for written < int(writeSize) {
+					n, err := f.Write(zeros[written:writeSize])
+					if err != nil {
+						break
+					}
+					written += n
+				}
+				if written < int(writeSize) {
 					break
 				}
 				remaining -= writeSize
