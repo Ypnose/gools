@@ -39,15 +39,9 @@ func main() {
 
 func createSecureClient() *http.Client {
 	tlsConfig := &tls.Config{
-		MinVersion: tls.VersionTLS13,
-		MaxVersion: tls.VersionTLS13,
-		CipherSuites: []uint16{
-			tls.TLS_AES_256_GCM_SHA384,
-			tls.TLS_CHACHA20_POLY1305_SHA256,
-		},
+		MinVersion:         tls.VersionTLS13,
+		MaxVersion:         tls.VersionTLS13,
 		InsecureSkipVerify: false,
-		ClientAuth:         tls.NoClientCert,
-		PreferServerCipherSuites: true,
 		// Disable session tickets for perfect forward secrecy
 		SessionTicketsDisabled: true,
 	}
