@@ -47,14 +47,9 @@ func main() {
 			_, err := os.Stat(arg)
 			if err != nil && os.IsNotExist(err) {
 				// It's not a file, treat as a flag
-				if arg != "-v" {
-					fmt.Fprintf(os.Stderr, "Flag provided but not defined: %s\n", arg)
-					printUsage(toolName)
-					os.Exit(1)
-				} else {
-					printUsage(toolName)
-					return
-				}
+				fmt.Fprintf(os.Stderr, "Flag provided but not defined: %s\n", arg)
+				printUsage(toolName)
+				os.Exit(1)
 			}
 		}
 
@@ -81,6 +76,11 @@ func main() {
 
 // hasStdin checks if there is data available on stdin
 func hasStdin() bool {
-	stat, _ := os.Stdin.Stat()
+	stat, err := os.Stdin.Stat()
+
+	if err != nil {
+		return false
+	}
+
 	return (stat.Mode() & os.ModeCharDevice) == 0
 }
