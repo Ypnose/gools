@@ -2,13 +2,13 @@ package main
 
 import (
 	"crypto/rand"
+	"encoding/hex"
 	"flag"
 	"fmt"
 	"io"
 	"os"
 	"os/signal"
 	"path/filepath"
-	"runtime"
 	"syscall"
 )
 
@@ -18,10 +18,51 @@ func usage() {
 	fmt.Fprintf(os.Stderr, "Usage: sponge [file]\nSoak up standard input and write to a file\n")
 }
 
+func secureDelete(path string) {
+	f, err := os.OpenFile(path, os.O_WRONLY, 0600)
+	if err == nil {
+		stat, err := f.Stat()
+		if err == nil {
+			f.Seek(0, 0)
+			zeros := make([]byte, 4096)
+			remaining := stat.Size()
+			for remaining > 0 {
+				writeSize := int64(len(zeros))
+				if remaining < writeSize {
+					writeSize = remaining
+				}
+				written := 0
+				for written < int(writeSize) {
+					n, err := f.Write(zeros[written:writeSize])
+					if err != nil || n <= 0 {
+						break
+					}
+					written += n
+				}
+				if written < int(writeSize) {
+					break
+				}
+				remaining -= writeSize
+			}
+			f.Sync()
+		}
+		f.Close()
+	}
+	os.Remove(path)
+}
+
 func cleanup(tmpfile string) {
 	if tmpfile != "" {
-		os.Remove(tmpfile)
+		secureDelete(tmpfile)
 	}
+}
+
+func generateRandomName() (string, error) {
+	bytes := make([]byte, 16)
+	if _, err := rand.Read(bytes); err != nil {
+		return "", fmt.Errorf("Failed to generate random filename: %v", err)
+	}
+	return hex.EncodeToString(bytes), nil
 }
 
 func setupSecureTempFile() (*os.File, string, error) {
@@ -41,18 +82,12 @@ func setupSecureTempFile() (*os.File, string, error) {
 		return nil, "", fmt.Errorf("Failed to create temp directory: %v", err)
 	}
 
-	// Generate cryptographically random string for filename (16 characters)
-	const letters = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
-	b := make([]byte, 16)
-	if _, err := rand.Read(b); err != nil {
-		return nil, "", fmt.Errorf("Failed to generate random filename: %v", err)
+	randName, err := generateRandomName()
+	if err != nil {
+		return nil, "", err
 	}
 
-	for i := range b {
-		b[i] = letters[int(b[i])%len(letters)]
-	}
-
-	tmpname := filepath.Join(tmpdir, fmt.Sprintf("sponge-%s.tmp", string(b)))
+	tmpname := filepath.Join(tmpdir, fmt.Sprintf("sponge-%s.tmp", randName))
 
 	tmpfile, err := os.OpenFile(tmpname, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0600)
 	if err != nil {
@@ -82,8 +117,16 @@ func copyWithBuffer(dst *os.File, src *os.File) error {
 	for {
 		n, err := src.Read(buf)
 		if n > 0 {
-			if _, werr := dst.Write(buf[:n]); werr != nil {
-				return werr
+			written := 0
+			for written < n {
+				m, werr := dst.Write(buf[written:n])
+				if werr != nil {
+					return werr
+				}
+				if m <= 0 {
+					return fmt.Errorf("write returned %d", m)
+				}
+				written += m
 			}
 		}
 		if err == io.EOF {
@@ -97,9 +140,6 @@ func copyWithBuffer(dst *os.File, src *os.File) error {
 }
 
 func main() {
-	runtime.LockOSThread()
-	defer runtime.UnlockOSThread()
-
 	flag.Usage = func() {
 		if len(os.Args) > 1 && os.Args[1] == "-help" {
 			usage()
@@ -181,34 +221,61 @@ func main() {
 	}
 
 	if err := os.Rename(tmpname, outfile); err == nil {
+		if mode != 0600 {
+			os.Chmod(outfile, mode)
+		}
 		return
 	}
 
-	src, openErr := os.Open(tmpname)
-	if openErr != nil {
+	outDir := filepath.Dir(outfile)
+	randName, err := generateRandomName()
+	if err != nil {
 		cleanup(tmpname)
-		fmt.Fprintf(os.Stderr, "Error opening temp file: %v\n", openErr)
+		fmt.Fprintf(os.Stderr, "Error generating random name: %v\n", err)
 		os.Exit(1)
 	}
-	defer src.Close()
+	tmpOutName := filepath.Join(outDir, fmt.Sprintf(".sponge-%s.tmp", randName))
 
-	dst, openErr := os.OpenFile(outfile, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, mode)
-	if openErr != nil {
+	src, err := os.Open(tmpname)
+	if err != nil {
 		cleanup(tmpname)
-		fmt.Fprintf(os.Stderr, "Error opening output file: %v\n", openErr)
+		fmt.Fprintf(os.Stderr, "Error opening temp file: %v\n", err)
 		os.Exit(1)
 	}
-	defer dst.Close()
+
+	dst, err := os.OpenFile(tmpOutName, os.O_WRONLY|os.O_CREATE|os.O_EXCL, mode)
+	if err != nil {
+		src.Close()
+		cleanup(tmpname)
+		fmt.Fprintf(os.Stderr, "Error creating output temp file: %v\n", err)
+		os.Exit(1)
+	}
 
 	if err := copyWithBuffer(dst, src); err != nil {
+		dst.Close()
+		src.Close()
+		os.Remove(tmpOutName)
 		cleanup(tmpname)
-		fmt.Fprintf(os.Stderr, "Error copying to output file: %v\n", err)
+		fmt.Fprintf(os.Stderr, "Error copying to output: %v\n", err)
 		os.Exit(1)
 	}
 
 	if err := dst.Sync(); err != nil {
+		dst.Close()
+		src.Close()
+		os.Remove(tmpOutName)
 		cleanup(tmpname)
-		fmt.Fprintf(os.Stderr, "Error syncing output file: %v\n", err)
+		fmt.Fprintf(os.Stderr, "Error syncing output: %v\n", err)
+		os.Exit(1)
+	}
+
+	dst.Close()
+	src.Close()
+
+	if err := os.Rename(tmpOutName, outfile); err != nil {
+		os.Remove(tmpOutName)
+		cleanup(tmpname)
+		fmt.Fprintf(os.Stderr, "Error renaming to final output: %v\n", err)
 		os.Exit(1)
 	}
 
