@@ -452,7 +452,7 @@ func generateTOTP(secret []byte) (string, error) {
 	code := binary.BigEndian.Uint32(hash[offset:]) & 0x7fffffff
 	code = code % 1000000
 
-	return fmt.Sprintf("%03d %03d", code/1000, code%1000), nil
+	return fmt.Sprintf("%03d%03d", code/1000, code%1000), nil
 }
 
 func parseEntriesBytes(content []byte) []TOTPEntry {
@@ -598,6 +598,8 @@ func initTemplate() error {
 			flex-wrap:wrap;
 		}
 		.code-value {
+			display:inline-flex;
+			gap:0.4em;
 			font-family:ui-monospace, SFMono-Regular, monospace;
 			font-size:1.25rem;
 			font-weight:600;
@@ -652,13 +654,13 @@ func initTemplate() error {
 		const INACTIVITY_TIMEOUT = 120000;
 		function resetInactivity() { clearTimeout(inactivityTimer); inactivityTimer = setTimeout(() => { document.cookie = 'session=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=' + (prefix ? prefix + '/' : '/') + ';'; alert('Session expired'); location.reload(); }, INACTIVITY_TIMEOUT); }
 		async function login() { const p = document.getElementById('password'), pw = p.value; p.value = ''; const r = await fetch(prefix + '/decrypt/', { method: 'POST', headers: {'Content-Type': 'application/x-www-form-urlencoded'}, body: 'password=' + encodeURIComponent(pw) }); if (r.ok) { entries = await r.json(); document.getElementById('login-container').style.display = 'none'; document.getElementById('vault-container').style.display = 'flex'; renderEntries(); resetInactivity(); ['mousemove','keypress','click'].forEach(e => document.addEventListener(e, resetInactivity)); } else { alert('Invalid password'); p.focus(); } }
-		function renderEntries() { const c = document.getElementById('entries'); c.innerHTML = ''; entries.forEach((e, i) => { const d = document.createElement('div'); d.className = 'entry'; d.innerHTML = '<div class="entry-label">' + escapeHtml(e.label) + '</div><div class="entry-actions"><button class="show-code-btn" onclick="toggleCode(' + i + ')">Show code</button><div class="code-display" id="code-' + i + '"><div class="code-value" id="code-value-' + i + '">------</div><svg class="progress-ring"><circle class="progress-ring-circle" cx="14" cy="14" r="11" stroke-dasharray="69.115" stroke-dashoffset="0" id="progress-' + i + '"/></svg><button class="copy-btn" onclick="copyCode(' + i + ')">Copy</button></div></div>'; c.appendChild(d); }); }
+		function renderEntries() { const c = document.getElementById('entries'); c.innerHTML = ''; entries.forEach((e, i) => { const d = document.createElement('div'); d.className = 'entry'; d.innerHTML = '<div class="entry-label">' + escapeHtml(e.label) + '</div><div class="entry-actions"><button class="show-code-btn" onclick="toggleCode(' + i + ')">Show code</button><div class="code-display" id="code-' + i + '"><div class="code-value" id="code-value-' + i + '" data-code=""><span>---</span><span>---</span></div><svg class="progress-ring"><circle class="progress-ring-circle" cx="14" cy="14" r="11" stroke-dasharray="69.115" stroke-dashoffset="0" id="progress-' + i + '"/></svg><button class="copy-btn" onclick="copyCode(' + i + ')">Copy</button></div></div>'; c.appendChild(d); }); }
 		function escapeHtml(t) { const d = document.createElement('div'); d.textContent = t; return d.innerHTML; }
 		async function toggleCode(i) { if (currentlyShownIndex !== null && currentlyShownIndex !== i) hideCode(currentlyShownIndex); const c = document.getElementById('code-' + i), b = document.querySelector('#entries > div:nth-child(' + (i + 1) + ') .show-code-btn'); if (c.style.display === 'flex') { hideCode(i); } else { showCode(i); b.textContent = 'Hide code'; currentlyShownIndex = i; } }
 		async function showCode(i) { document.getElementById('code-' + i).style.display = 'flex'; await updateCode(i); activeTimers[i] = setInterval(() => updateCode(i), 1000); autoHideTimers[i] = setTimeout(() => hideCode(i), 30000); }
 		function hideCode(i) { document.getElementById('code-' + i).style.display = 'none'; document.querySelector('#entries > div:nth-child(' + (i + 1) + ') .show-code-btn').textContent = 'Show code'; if (activeTimers[i]) { clearInterval(activeTimers[i]); delete activeTimers[i]; } if (autoHideTimers[i]) { clearTimeout(autoHideTimers[i]); delete autoHideTimers[i]; } if (currentlyShownIndex === i) currentlyShownIndex = null; }
-		async function updateCode(i) { const r = await fetch(prefix + '/generate/', { method: 'POST', headers: {'Content-Type': 'application/x-www-form-urlencoded'}, body: 'label=' + encodeURIComponent(entries[i].label) }); if (r.ok) { const d = await r.json(); document.getElementById('code-value-' + i).textContent = d.code; const p = document.getElementById('progress-' + i); p.style.strokeDashoffset = 69.115 * (1 - d.remaining / 30); } }
-		async function copyCode(i) { await navigator.clipboard.writeText(document.getElementById('code-value-' + i).textContent); const b = document.querySelector('#entries > div:nth-child(' + (i + 1) + ') .copy-btn'), t = b.textContent; b.textContent = 'Copied!'; setTimeout(() => b.textContent = t, 2000); }
+		async function updateCode(i) { const r = await fetch(prefix + '/generate/', { method: 'POST', headers: {'Content-Type': 'application/x-www-form-urlencoded'}, body: 'label=' + encodeURIComponent(entries[i].label) }); if (r.ok) { const d = await r.json(); const cv = document.getElementById('code-value-' + i); cv.innerHTML = '<span>' + d.code.slice(0,3) + '</span><span>' + d.code.slice(3) + '</span>'; cv.dataset.code = d.code; const p = document.getElementById('progress-' + i); p.style.strokeDashoffset = 69.115 * (1 - d.remaining / 30); } }
+		async function copyCode(i) { const code = document.getElementById('code-value-' + i).dataset.code; await navigator.clipboard.writeText(code); const b = document.querySelector('#entries > div:nth-child(' + (i + 1) + ') .copy-btn'), t = b.textContent; b.textContent = 'Copied!'; setTimeout(() => b.textContent = t, 2000); }
 		window.onload = () => document.getElementById('password').focus();
 	</script>
 </body>
