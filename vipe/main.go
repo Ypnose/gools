@@ -9,22 +9,54 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 )
 
 const usageMsg = "Usage: vipe \nAllows editing piped data in your $EDITOR"
 
-func generateRandomName() string {
+func generateRandomName() (string, error) {
 	bytes := make([]byte, 16)
 	if _, err := rand.Read(bytes); err != nil {
-		fatal("Random generation failed:", err)
+		return "", fmt.Errorf("Failed to generate random filename: %v", err)
 	}
-	return hex.EncodeToString(bytes)
+	return hex.EncodeToString(bytes), nil
+}
+
+func setupSecureTempFile() (*os.File, string, error) {
+	oldMask := syscall.Umask(0077)
+	defer syscall.Umask(oldMask)
+
+	tmpdir := os.Getenv("TMPDIR")
+	if tmpdir == "" {
+		tmpdir = "/tmp"
+	}
+
+	if !filepath.IsAbs(tmpdir) {
+		return nil, "", fmt.Errorf("Temporary directory path must be absolute")
+	}
+
+	if err := os.MkdirAll(tmpdir, 0700); err != nil {
+		return nil, "", fmt.Errorf("Failed to create temp directory: %v", err)
+	}
+
+	randName, err := generateRandomName()
+	if err != nil {
+		return nil, "", err
+	}
+
+	tmpname := filepath.Join(tmpdir, fmt.Sprintf("vipe-%s.tmp", randName))
+
+	tmpfile, err := os.OpenFile(tmpname, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0600)
+	if err != nil {
+		return nil, "", fmt.Errorf("Failed to create temp file: %v", err)
+	}
+
+	return tmpfile, tmpname, nil
 }
 
 func main() {
-	// Custom flag handling to match exact error messages
 	flag.Usage = func() {
 		fmt.Fprintln(os.Stderr, usageMsg)
 	}
@@ -49,21 +81,19 @@ func main() {
 		os.Exit(1)
 	}
 
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
-
-	randName := generateRandomName()
-	tmpfile, err := os.CreateTemp("", "vipe-"+randName+".*")
+	tmpfile, tmpPath, err := setupSecureTempFile()
 	if err != nil {
 		fatal("Tempfile creation failed:", err)
 	}
-	tmpPath := tmpfile.Name()
 
 	cleanup := func() {
 		if tmpPath != "" {
 			secureDelete(tmpPath)
 		}
 	}
+
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
 
 	go func() {
 		<-sigChan
@@ -72,10 +102,6 @@ func main() {
 	}()
 
 	defer cleanup()
-
-	if err := tmpfile.Chmod(0600); err != nil {
-		fatal("chmod failed:", err)
-	}
 
 	if _, err := io.Copy(tmpfile, os.Stdin); err != nil {
 		fatal("stdin copy failed:", err)
@@ -95,20 +121,11 @@ func main() {
 		}
 		fatal("TTY open failed:", err)
 	}
-
-	oldStdin, oldStdout := os.Stdin, os.Stdout
-	defer func() {
-		if err := tty.Close(); err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: failed to close TTY: %v\n", err)
-		}
-		os.Stdin, os.Stdout = oldStdin, oldStdout
-	}()
+	defer tty.Close()
 
 	if _, err := tty.Stat(); err != nil {
 		fatal("TTY stat failed:", err)
 	}
-
-	os.Stdin, os.Stdout = tty, tty
 
 	editor := getEditor()
 	if editor == "" {
@@ -117,7 +134,7 @@ func main() {
 
 	editorParts := strings.Fields(editor)
 	cmd := exec.Command(editorParts[0], append(editorParts[1:], tmpPath)...)
-	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = tty, tty, os.Stderr
 
 	if err := cmd.Run(); err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok {
@@ -132,7 +149,7 @@ func main() {
 	}
 	defer edited.Close()
 
-	if _, err := io.Copy(oldStdout, edited); err != nil {
+	if _, err := io.Copy(os.Stdout, edited); err != nil {
 		fatal("Output failed:", err)
 	}
 }
@@ -162,9 +179,11 @@ func isTerminal(f *os.File) bool {
 }
 
 func secureDelete(path string) {
-	if f, err := os.OpenFile(path, os.O_WRONLY, 0600); err == nil {
-		defer f.Close()
-		if stat, err := f.Stat(); err == nil {
+	f, err := os.OpenFile(path, os.O_WRONLY, 0600)
+	if err == nil {
+		stat, err := f.Stat()
+		if err == nil {
+			f.Seek(0, 0)
 			zeros := make([]byte, 4096)
 			remaining := stat.Size()
 			for remaining > 0 {
@@ -175,7 +194,7 @@ func secureDelete(path string) {
 				written := 0
 				for written < int(writeSize) {
 					n, err := f.Write(zeros[written:writeSize])
-					if err != nil {
+					if err != nil || n <= 0 {
 						break
 					}
 					written += n
@@ -187,6 +206,7 @@ func secureDelete(path string) {
 			}
 			f.Sync()
 		}
+		f.Close()
 	}
 	os.Remove(path)
 }
