@@ -27,10 +27,7 @@ func secureDelete(path string) {
 			zeros := make([]byte, 4096)
 			remaining := stat.Size()
 			for remaining > 0 {
-				writeSize := int64(len(zeros))
-				if remaining < writeSize {
-					writeSize = remaining
-				}
+				writeSize := min(remaining, int64(len(zeros)))
 				written := 0
 				for written < int(writeSize) {
 					n, err := f.Write(zeros[written:writeSize])

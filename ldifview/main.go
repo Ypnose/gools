@@ -161,8 +161,8 @@ func stripParentDN(dn, parentDN string) string {
 		return dn
 	}
 	suffix := "," + parentDN
-	if strings.HasSuffix(dn, suffix) {
-		return strings.TrimSuffix(dn, suffix)
+	if before, ok := strings.CutSuffix(dn, suffix); ok {
+		return before
 	}
 	return dn
 }

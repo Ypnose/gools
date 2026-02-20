@@ -141,9 +141,9 @@ func convertEMLToMBOX(emlPath string, writer *bufio.Writer) (messageInfo, error)
 			dateStr = currentValue
 		}
 
-		if idx := strings.Index(line, ":"); idx != -1 {
-			currentHeader = strings.ToLower(strings.TrimSpace(line[:idx]))
-			currentValue = strings.TrimSpace(line[idx+1:])
+		if before, after, ok := strings.Cut(line, ":"); ok {
+			currentHeader = strings.ToLower(strings.TrimSpace(before))
+			currentValue = strings.TrimSpace(after)
 		}
 	}
 

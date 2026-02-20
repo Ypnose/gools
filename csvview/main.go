@@ -45,20 +45,20 @@ type Table struct {
 	saveMsg     string
 	saveMsgTime int64
 	search      struct {
-		active    bool
-		results   [][2]int
-		current   int
-		pattern   string
-		buf       strings.Builder
+		active  bool
+		results [][2]int
+		current int
+		pattern string
+		buf     strings.Builder
 	}
 	sort struct {
-		col     int
-		asc     bool
+		col int
+		asc bool
 	}
 	// Reusable buffers
-	statusBuf  strings.Builder
-	formatBuf  strings.Builder
-	screen     tcell.Screen
+	statusBuf strings.Builder
+	formatBuf strings.Builder
+	screen    tcell.Screen
 }
 
 func NewTable(separator rune, screen tcell.Screen) (*Table, error) {
@@ -102,8 +102,8 @@ func NewTable(separator rune, screen tcell.Screen) (*Table, error) {
 		separator: separator,
 		screen:    screen,
 		sort: struct {
-			col     int
-			asc     bool
+			col int
+			asc bool
 		}{-1, true},
 	}
 
@@ -197,7 +197,7 @@ func (t *Table) findFirstVisibleColumn() int {
 
 	for i := t.currentCol - 1; i >= 0; i-- {
 		width := t.cols[i].width + 2
-		if totalWidth + width > availWidth {
+		if totalWidth+width > availWidth {
 			break
 		}
 		totalWidth += width
@@ -321,7 +321,7 @@ func drawString(screen tcell.Screen, x, y int, s string, style tcell.Style) {
 }
 
 func drawSpaces(screen tcell.Screen, x, y, count int, style tcell.Style) {
-	for i := 0; i < count; i++ {
+	for i := range count {
 		screen.SetContent(x+i, y, ' ', nil, style)
 	}
 }
@@ -537,7 +537,7 @@ func (t *Table) handleNavigation(ev *tcell.EventKey) bool {
 		t.sortCurrentColumn()
 	case tcell.KeyCtrlC, tcell.KeyEscape:
 		if t.confirmQuit() {
-			return false  // Exit
+			return false // Exit
 		}
 		return true
 	}
@@ -545,9 +545,9 @@ func (t *Table) handleNavigation(ev *tcell.EventKey) bool {
 	switch ev.Rune() {
 	case 'q':
 		if t.confirmQuit() {
-			return false  // Exit
+			return false // Exit
 		}
-		return true     // Continue if user cancelled
+		return true // Continue if user cancelled
 	case 'e':
 		if !t.fromStdin {
 			t.editMode = true
@@ -610,8 +610,8 @@ func (t *Table) saveFile() error {
 				// Write it exactly as is - these are likely formula fields
 				file.WriteString(field)
 			} else if strings.ContainsRune(field, t.separator) ||
-					  strings.Contains(field, "\"") ||
-					  strings.Contains(field, "\n") {
+				strings.Contains(field, "\"") ||
+				strings.Contains(field, "\n") {
 				file.WriteString("\"")
 				file.WriteString(strings.ReplaceAll(field, "\"", "\"\""))
 				file.WriteString("\"")
@@ -626,20 +626,6 @@ func (t *Table) saveFile() error {
 	t.saveMsgTime = time.Now().Unix()
 	t.modified = false
 	return nil
-}
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
-
-func max(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
 }
 
 func isDataFromStdin() bool {

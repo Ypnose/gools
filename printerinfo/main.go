@@ -1,15 +1,15 @@
 package main
 
 import (
+	"encoding/hex"
 	"flag"
 	"fmt"
 	"log"
 	"net"
 	"os"
+	"sort"
 	"strings"
 	"time"
-	"encoding/hex"
-	"sort"
 	"unicode/utf8"
 
 	"github.com/gosnmp/gosnmp"
@@ -21,7 +21,7 @@ const (
 
 type Supply struct {
 	Name  string
-	Level interface{}
+	Level any
 }
 
 func main() {
@@ -159,7 +159,7 @@ func getSnmpVersion(version string) gosnmp.SnmpVersion {
 	}
 }
 
-func formatMAC(value interface{}) string {
+func formatMAC(value any) string {
 	if value == nil {
 		return "N/A"
 	}
@@ -178,7 +178,7 @@ func formatMAC(value interface{}) string {
 	return decodeValue(value)
 }
 
-func decodeValue(value interface{}) string {
+func decodeValue(value any) string {
 	if value == nil {
 		return "N/A"
 	}

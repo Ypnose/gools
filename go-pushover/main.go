@@ -41,7 +41,7 @@ func init() {
 }
 
 func checkNetworkAccess(debug bool) bool {
-	for i := 0; i < maxRetries; i++ {
+	for i := range maxRetries {
 		if debug {
 			log.SetFlags(log.LstdFlags)
 			log.Printf("Network check attempt to %s (%d/%d)", CheckURL, i+1, maxRetries)

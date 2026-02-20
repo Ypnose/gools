@@ -11,11 +11,11 @@ import (
 )
 
 const (
-	BROADCAST_IP = "255.255.255.255"
-	UDP_PORT = 9
-	MAGIC_PACKET_SIZE = 102 // 6 bytes of 0xFF + 16 * 6 bytes MAC = 102
+	BROADCAST_IP       = "255.255.255.255"
+	UDP_PORT           = 9
+	MAGIC_PACKET_SIZE  = 102 // 6 bytes of 0xFF + 16 * 6 bytes MAC = 102
 	MAC_ADDRESS_LENGTH = 6
-	CONNECT_TIMEOUT = 5 * time.Second
+	CONNECT_TIMEOUT    = 5 * time.Second
 )
 
 var (
@@ -59,12 +59,12 @@ func createMagicPacket(macBytes []byte) []byte {
 	packet := make([]byte, MAGIC_PACKET_SIZE)
 
 	// First 6 bytes are 0xFF
-	for i := 0; i < 6; i++ {
+	for i := range 6 {
 		packet[i] = 0xFF
 	}
 
 	// Next 96 bytes are 16 repetitions of the MAC address
-	for i := 0; i < 16; i++ {
+	for i := range 16 {
 		copy(packet[6+i*MAC_ADDRESS_LENGTH:], macBytes)
 	}
 
