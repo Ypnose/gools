@@ -632,10 +632,15 @@ func initTemplate() error {
 			return d.password;
 		}
 		async function copyPassword(i) {
-			const pw = await fetchPassword(i);
-			if (pw === null) { alert('Failed to retrieve password'); return; }
-			await navigator.clipboard.writeText(pw);
 			const b = document.getElementById('entries').children[i].querySelector('.copy-btn');
+			try {
+				await navigator.clipboard.write([new ClipboardItem({
+					'text/plain': fetchPassword(i).then(pw => {
+						if (pw === null) throw new Error('Failed to retrieve password');
+						return new Blob([pw], {type: 'text/plain'});
+					})
+				})]);
+			} catch(e) { alert('Failed to retrieve password'); return; }
 			b.textContent = 'Copied!';
 			if (clipboardTimers[i]) clearTimeout(clipboardTimers[i]);
 			clipboardTimers[i] = setTimeout(() => {
