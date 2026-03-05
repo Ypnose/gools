@@ -54,7 +54,7 @@ type rateLimiter struct {
 	window   time.Duration
 }
 
-const sessionTimeout = 2 * time.Minute
+const sessionTimeout = 5 * time.Minute
 
 type PasswordEntry struct {
 	Label string `json:"label"`
@@ -581,10 +581,10 @@ func initTemplate() error {
 	</div>
 	<script nonce="{{.Nonce}}">
 		const prefix = {{.Prefix}};
-		let entries = [], autoHideTimers = {}, clipboardTimers = {}, inactivityTimer;
-		const INACTIVITY_TIMEOUT = 120000;
-		function resetInactivity() { clearTimeout(inactivityTimer); inactivityTimer = setTimeout(() => { entries.forEach((_, i) => { hidePassword(i); if (clipboardTimers[i]) { clearTimeout(clipboardTimers[i]); delete clipboardTimers[i]; } }); navigator.clipboard.writeText('').catch(() => {}); document.cookie = 'session=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=' + (prefix ? prefix + '/' : '/') + ';'; alert('Session expired'); location.reload(); }, INACTIVITY_TIMEOUT); }
-		async function login() { const p = document.getElementById('password'), pw = p.value; p.value = ''; const r = await fetch(prefix + '/decrypt/', { method: 'POST', headers: {'Content-Type': 'application/x-www-form-urlencoded'}, body: 'password=' + encodeURIComponent(pw) }); if (r.ok) { entries = await r.json(); document.getElementById('login-container').style.display = 'none'; document.getElementById('safe-container').style.display = 'flex'; renderEntries(); resetInactivity(); ['mousemove','keypress','click'].forEach(e => document.addEventListener(e, resetInactivity)); } else { alert('Invalid password'); p.focus(); } }
+		let entries = [], autoHideTimers = {}, clipboardTimers = {};
+		const SESSION_DURATION = 300000;
+		function startSessionTimer() { setTimeout(() => { entries.forEach((_, i) => { hidePassword(i); if (clipboardTimers[i]) { clearTimeout(clipboardTimers[i]); delete clipboardTimers[i]; } }); navigator.clipboard.writeText(crypto.randomUUID()).catch(() => {}); document.cookie = 'session=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=' + (prefix ? prefix + '/' : '/') + ';'; alert('Session expired'); location.reload(); }, SESSION_DURATION); }
+		async function login() { const p = document.getElementById('password'), pw = p.value; p.value = ''; const r = await fetch(prefix + '/decrypt/', { method: 'POST', headers: {'Content-Type': 'application/x-www-form-urlencoded'}, body: 'password=' + encodeURIComponent(pw) }); if (r.ok) { entries = await r.json(); document.getElementById('login-container').style.display = 'none'; document.getElementById('safe-container').style.display = 'flex'; renderEntries(); startSessionTimer(); } else { alert('Invalid password'); p.focus(); } }
 		function renderEntries() {
 			const c = document.getElementById('entries');
 			c.innerHTML = '';
@@ -633,19 +633,22 @@ func initTemplate() error {
 		}
 		async function copyPassword(i) {
 			const b = document.getElementById('entries').children[i].querySelector('.copy-btn');
+			const pw = await fetchPassword(i);
+			if (pw === null) { alert('Failed to retrieve password'); return; }
 			try {
 				await navigator.clipboard.write([new ClipboardItem({
-					'text/plain': fetchPassword(i).then(pw => {
-						if (pw === null) throw new Error('Failed to retrieve password');
-						return new Blob([pw], {type: 'text/plain'});
-					})
+					'text/plain': Promise.resolve(new Blob([pw], {type: 'text/plain'}))
 				})]);
-			} catch(e) { alert('Failed to retrieve password'); return; }
+			} catch(e) {
+				try {
+					await navigator.clipboard.writeText(pw);
+				} catch(e2) { alert('Clipboard access denied'); return; }
+			}
 			b.textContent = 'Copied!';
 			if (clipboardTimers[i]) clearTimeout(clipboardTimers[i]);
 			clipboardTimers[i] = setTimeout(() => {
 				b.textContent = 'Copy';
-				navigator.clipboard.writeText('').catch(() => {});
+				navigator.clipboard.writeText(crypto.randomUUID()).catch(() => {});
 			}, 5000);
 		}
 		async function togglePassword(i) {
@@ -1007,8 +1010,6 @@ func handleRetrieve(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Session expired", http.StatusUnauthorized)
 		return
 	}
-	sess.expiresAt = time.Now().Add(sessionTimeout)
-
 	secret, err := sess.getSecret(label)
 	sessionMu.Unlock()
 
