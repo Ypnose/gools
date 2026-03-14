@@ -633,17 +633,14 @@ func initTemplate() error {
 		}
 		async function copyPassword(i) {
 			const b = document.getElementById('entries').children[i].querySelector('.copy-btn');
-			const pw = await fetchPassword(i);
-			if (pw === null) { alert('Failed to retrieve password'); return; }
 			try {
 				await navigator.clipboard.write([new ClipboardItem({
-					'text/plain': Promise.resolve(new Blob([pw], {type: 'text/plain'}))
+					'text/plain': fetchPassword(i).then(pw => {
+						if (pw === null) throw new Error('Failed to retrieve password');
+						return new Blob([pw], {type: 'text/plain'});
+					})
 				})]);
-			} catch(e) {
-				try {
-					await navigator.clipboard.writeText(pw);
-				} catch(e2) { alert('Clipboard access denied'); return; }
-			}
+			} catch(e) { alert('Failed to retrieve password'); return; }
 			b.textContent = 'Copied!';
 			if (clipboardTimers[i]) clearTimeout(clipboardTimers[i]);
 			clipboardTimers[i] = setTimeout(() => {
