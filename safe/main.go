@@ -658,6 +658,7 @@ func initTemplate() error {
 				entries.forEach((_, j) => { if (j !== i) hidePassword(j); });
 				document.getElementById('pw-value-' + i).textContent = pw;
 				display.style.display = 'block';
+				document.getElementById('entries').children[i].querySelector('.show-pw-btn').textContent = 'Hide password';
 				if (autoHideTimers[i]) clearTimeout(autoHideTimers[i]);
 				autoHideTimers[i] = setTimeout(() => hidePassword(i), 5000);
 			}
@@ -666,6 +667,8 @@ func initTemplate() error {
 			const display = document.getElementById('pw-' + i);
 			display.style.display = 'none';
 			document.getElementById('pw-value-' + i).textContent = '';
+			const entry = document.getElementById('entries').children[i];
+			if (entry) entry.querySelector('.show-pw-btn').textContent = 'Show password';
 			if (autoHideTimers[i]) { clearTimeout(autoHideTimers[i]); delete autoHideTimers[i]; }
 		}
 		window.onload = () => {
