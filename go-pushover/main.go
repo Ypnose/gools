@@ -139,7 +139,9 @@ func main() {
 		"message":   {*message},
 	}
 
-	if os.Getenv("PUSH_PRIORITY_HIGH") == "1" {
+	if os.Getenv("PUSH_PRIORITY_LOW") == "1" {
+		data.Set("priority", "-1")
+	} else if os.Getenv("PUSH_PRIORITY_HIGH") == "1" {
 		data.Set("priority", "1")
 	} else if os.Getenv("PUSH_PRIORITY_CRITICAL") == "1" {
 		data.Set("priority", "2")
