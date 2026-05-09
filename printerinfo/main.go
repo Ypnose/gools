@@ -94,24 +94,26 @@ func main() {
 
 func getBasicInfo(snmp *gosnmp.GoSNMP) (string, error) {
 	result, err := snmp.Get([]string{
-		"1.3.6.1.2.1.1.5.0",        // Name
-		"1.3.6.1.2.1.25.3.2.1.3.1", // Model
-		"1.3.6.1.2.1.2.2.1.6.1",    // MAC Address
-		"1.3.6.1.2.1.1.6.0",        // Location
+		"1.3.6.1.2.1.1.5.0",         // Name
+		"1.3.6.1.2.1.25.3.2.1.3.1",  // Model
+		"1.3.6.1.2.1.43.5.1.1.17.1", // Serial Number
+		"1.3.6.1.2.1.2.2.1.6.1",     // MAC Address
+		"1.3.6.1.2.1.1.6.0",         // Location
 	})
 	if err != nil {
 		return "", fmt.Errorf("SNMP Get error: %v", err)
 	}
 
-	if len(result.Variables) < 4 {
-		return "", fmt.Errorf("expected 4 SNMP variables, got %d", len(result.Variables))
+	if len(result.Variables) < 5 {
+		return "", fmt.Errorf("expected 5 SNMP variables, got %d", len(result.Variables))
 	}
 
-	return fmt.Sprintf("Name: %s\nModel: %s\nMAC Address: %s\nLocation: %s\n",
+	return fmt.Sprintf("Name: %s\nModel: %s\nSerial: %s\nMAC Address: %s\nLocation: %s\n",
 		decodeValue(result.Variables[0].Value),
 		decodeValue(result.Variables[1].Value),
-		formatMAC(result.Variables[2].Value),
-		decodeValue(result.Variables[3].Value)), nil
+		decodeValue(result.Variables[2].Value),
+		formatMAC(result.Variables[3].Value),
+		decodeValue(result.Variables[4].Value)), nil
 }
 
 func getSupplies(snmp *gosnmp.GoSNMP) ([]Supply, error) {
