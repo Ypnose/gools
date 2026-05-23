@@ -501,10 +501,7 @@ func (t *Table) handleNavigation(ev *tcell.EventKey) bool {
 		if t.currentRow >= len(t.data) {
 			t.currentRow = len(t.data) - 1
 		}
-		t.scrollRow = t.currentRow - (t.height - 3)
-		if t.scrollRow < 0 {
-			t.scrollRow = 0
-		}
+		t.scrollRow = max(t.currentRow-(t.height-3), 0)
 	case tcell.KeyHome:
 		t.currentRow = 0
 		t.scrollRow = 0
