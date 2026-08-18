@@ -1,3 +1,3 @@
 module github.com/Ypnose/gools/emltombox
 
-go 1.23
+go 1.26.5
